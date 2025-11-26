@@ -21,3 +21,6 @@ printer
 failedlogins.txt
 .claude
 req*
+.vscode/launch.json
+.gitignore
+logs/balances.log
