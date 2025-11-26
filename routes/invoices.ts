@@ -4,6 +4,7 @@ import { generate } from "$lib/invoices";
 import { err } from "$lib/logging";
 import { bail, fail, fields, getInvoice, getUser } from "$lib/utils";
 import rpc from "@coinos/rpc";
+import { v4 } from "uuid";
 
 export default {
   async get(req, res) {
@@ -47,7 +48,7 @@ export default {
     try {
       const { id } = req.params;
       const { body } = req;
-      const { tip, webhook, secret } = body.invoice;
+      const { tip, webhook, secret, received } = body.invoice;
 
       if (tip < 0) fail("Invalid tip");
 
@@ -63,6 +64,7 @@ export default {
       }
 
       invoice = await generate({ invoice, user });
+
       await s(`invoice:${id}`, invoice);
 
       res.send(invoice);
