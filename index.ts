@@ -4,10 +4,12 @@ import { admin, auth, optional } from "$lib/auth";
 import { fixBolt12, listenForLightning, ensureListenerAlive, replay } from "$lib/lightning";
 import { startHealthCheck } from "$lib/health";
 import { getLocations } from "$lib/locations";
+import { migrateAccounts } from "$lib/migrate";
 import nwc from "$lib/nwc";
-import { catchUp, check } from "$lib/payments";
+import { check } from "$lib/payments";
 import { getFx } from "$lib/rates";
 import { sendHeartbeat } from "$lib/sockets";
+import { startZmq } from "$lib/zmq";
 
 import ecash from "$routes/ecash";
 import email from "$routes/email";
@@ -26,11 +28,14 @@ import users from "$routes/users";
 try {
   getLocations();
   getFx();
-  catchUp();
   nwc();
   check();
-  // startHealthCheck();
-} catch (e) {}
+  startHealthCheck();
+  startZmq();
+  migrateAccounts().then((n) => n && console.log(`Migrated ${n} accounts`));
+} catch (e) {
+  console.log(e);
+}
 
 setTimeout(listenForLightning, 2000);
 setInterval(ensureListenerAlive, 120000);
@@ -107,6 +112,7 @@ app.get("/pay/:username/:amount", lnurl.pay);
 app.post("/freeze", payments.freeze);
 
 app.post("/confirm", payments.confirm);
+app.post("/bitcoin/tx", payments.txWebhook);
 app.post("/bitcoin/fee", auth, payments.fee);
 app.post("/bitcoin/send", auth, payments.send);
 app.post("/ark/send", auth, payments.ark);
