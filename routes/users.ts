@@ -307,6 +307,7 @@ export default {
 
       const attributes = [
         "about",
+        "accountIndex",
         "arkAddress",
         "autowithdraw",
         "banner",
@@ -839,7 +840,7 @@ export default {
       for (const id of await db.lRange(`${user.id}:accounts`, 0, -1)) {
         const account = await g(`account:${id}`);
         if (account) {
-          if (account.seed && account.pubkey && !account.importedAt) {
+          if ((account.seed || user.seed) && account.pubkey && !account.importedAt) {
             await importAccountHistory(account);
           }
           account.balance = await getBalance(id);
