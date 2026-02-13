@@ -520,13 +520,30 @@ const pay = async ({ aid = undefined, amount, to, user }) => {
     });
   }
 
-  const fee = Math.max(5, Math.round(amount * 0.02));
+  let fee;
+  const ourfee = Math.round(amount * (config.fee.lightning || 0));
   if (lnurl) {
-    amount -= fee;
+    fee = Math.max(5, Math.round(amount * 0.02));
+    amount -= fee + ourfee;
     const { callback } = (await got(lnurl).json()) as any;
     ({ pr } = (await got(`${callback}?amount=${amount * 1000}`).json()) as any);
+  } else if (to.startsWith("lno")) {
+    const { id: source } = await ln.getinfo();
+    const { offer_issuer_id } = await ln.decode(to);
+    const { routes } = await ln.getroutes(
+      source, offer_issuer_id, amount * 1000,
+      ["auto.localchans", "auto.sourcefree"],
+      Math.round(amount * 0.02) * 1000, 6,
+    );
+    fee = routes.length
+      ? Math.max(5, Math.round((routes[0].path[0].amount_msat - routes[0].amount_msat) / 1000))
+      : 0;
+    amount -= fee + ourfee;
+    const { invoice } = await ln.fetchinvoice(to, amount * 1000);
+    pr = invoice;
   } else if (to.startsWith("ln")) {
-    amount -= fee;
+    fee = Math.max(5, Math.round(amount * 0.02));
+    amount -= fee + ourfee;
     pr = to;
   }
 
@@ -762,7 +779,7 @@ export const sendKeysend = async ({
       destination: pubkey,
       amount_msat: amount * 1000,
       maxfee: fee * 1000,
-      retry_for: 10,
+      retry_for: 20,
       extratlvs,
     });
   } catch (e) {
@@ -798,7 +815,8 @@ export const sendLightning = async ({
   const amt = amount_msat ? Math.round(amount_msat / 1000) : amount;
   let minfee = Math.max(5, Math.round(amt * 0.005));
   const { channels } = await ln.listpeerchannels();
-  if (channels.some((c) => c.peer_id === payee)) minfee = 0;
+  const isDirect = channels.some((c) => c.peer_id === payee);
+  const minfee = isDirect ? 0 : Math.max(Math.round(amount * 0.005), 5);
 
   fee = Math.max(Number.parseInt(fee) || minfee, minfee);
   if (fee < 0) fail("Fee cannot be negative");
@@ -1401,8 +1419,8 @@ const finalize = async (r, p) => {
   nwcNotify(p);
 
   const maxfee = p.fee;
-  const { amount_msat } = await ln.decode(p.hash);
-  p.fee = Math.round((r.amount_sent_msat - amount_msat) / 1000);
+  const { amount_msat, invoice_amount_msat } = await ln.decode(p.hash);
+  p.fee = Math.round((r.amount_sent_msat - (amount_msat || invoice_amount_msat)) / 1000);
   p.ref = preimage;
 
   if (!(await g(`payment:${p.id}`)).ref) {
