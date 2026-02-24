@@ -68,8 +68,7 @@ export async function listenForLightning() {
             handleZap(inv, pubkey);
           }
         } catch (e) {
-          if (!e.message.includes("Unexpected"))
-            warn("failed to handle zap", e.message);
+          if (!e.message.includes("Unexpected")) warn("failed to handle zap", e.message);
         }
       }
 
@@ -89,11 +88,7 @@ export async function listenForLightning() {
     const errorCode = e?.code ?? e?.errno ?? "unknown";
     const errorMsg = e?.message ?? String(e);
 
-    err(
-      `lightning listener: error waiting for invoice`,
-      `code=${errorCode}`,
-      `error=${errorMsg}`
-    );
+    err(`lightning listener: error waiting for invoice`, `code=${errorCode}`, `error=${errorMsg}`);
 
     if (e instanceof LightningUnavailableError) {
       err("lightning listener: RPC socket unavailable");
@@ -104,7 +99,7 @@ export async function listenForLightning() {
     if (listenerRetries >= MAX_LISTENER_RETRIES) {
       err(
         `lightning listener: ${MAX_LISTENER_RETRIES} consecutive failures, ` +
-          `last error: ${errorMsg}`
+          `last error: ${errorMsg}`,
       );
       err("lightning listener: exiting process to trigger container restart");
 
@@ -116,7 +111,7 @@ export async function listenForLightning() {
 
     warn(
       `lightning listener: retry ${listenerRetries}/${MAX_LISTENER_RETRIES} ` +
-        `in ${LISTENER_RETRY_DELAY / 1000}s`
+        `in ${LISTENER_RETRY_DELAY / 1000}s`,
     );
     setTimeout(listenForLightning, LISTENER_RETRY_DELAY);
   }
@@ -158,8 +153,7 @@ export async function replay(index) {
           handleZap(inv, pubkey);
         }
       } catch (e) {
-        if (!e.message.includes("Unexpected"))
-          warn("failed to handle zap", e.message);
+        if (!e.message.includes("Unexpected")) warn("failed to handle zap", e.message);
       }
     }
 

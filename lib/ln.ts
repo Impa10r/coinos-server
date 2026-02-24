@@ -85,7 +85,7 @@ function lightningProxy(rpcPath: string) {
 
       if (isUnavailable(e)) {
         throw new LightningUnavailableError(
-          `Lightning RPC unavailable at ${rpcPath} (${e?.code ?? e?.errno ?? "error"})`
+          `Lightning RPC unavailable at ${rpcPath} (${e?.code ?? e?.errno ?? "error"})`,
         );
       }
       throw e;
@@ -113,7 +113,7 @@ function lightningProxy(rpcPath: string) {
           }
         };
       },
-    }
+    },
   );
 }
 
