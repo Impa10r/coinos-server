@@ -323,6 +323,7 @@ export default {
         "destination",
         "display",
         "email",
+        "encryptedKeys",
         "fiat",
         "language",
         "locktime",
