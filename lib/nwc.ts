@@ -2,14 +2,8 @@ import config from "$config";
 import { archive, db, g, gf } from "$lib/db";
 import { generate } from "$lib/invoices";
 import ln from "$lib/ln";
-import { err, l, warn } from "$lib/logging";
-import {
-  handleZap,
-  serverPubkey,
-  serverPubkey2,
-  serverSecret,
-  serverSecret2,
-} from "$lib/nostr";
+import { l, warn } from "$lib/logging";
+import { handleZap, serverPubkey, serverPubkey2, serverSecret, serverSecret2 } from "$lib/nostr";
 import { sendInternal, sendKeysend, sendLightning } from "$lib/payments";
 import { getBalance } from "$lib/tb";
 import { fail, getInvoice, sleep } from "$lib/utils";
