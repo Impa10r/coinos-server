@@ -21,6 +21,7 @@ import { getFx } from "$lib/rates";
 import { sendHeartbeat, websocket } from "$lib/sockets";
 import { initTigerBeetle } from "$lib/tb";
 import { startZmq } from "$lib/zmq";
+import { listenForDMs } from "$lib/dmNotifications";
 
 import ecash from "$routes/ecash";
 import email from "$routes/email";
@@ -57,6 +58,7 @@ try {
 
 setTimeout(listenForLightning, 2000);
 setInterval(ensureListenerAlive, 120000);
+listenForDMs();
 setInterval(sendHeartbeat, 2000);
 
 app.get("/balances", info.balances);
