@@ -1545,4 +1545,4 @@ const freezeCheck = async () => {
 
   setTimeout(freezeCheck, 10000);
 };
-freezeCheck();
+setTimeout(freezeCheck, 10_000);
