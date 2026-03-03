@@ -55,6 +55,7 @@ import got from "got";
 import { v4 } from "uuid";
 
 import { PaymentType } from "$lib/types";
+import { P2A_VALUE, getP2AAddress, isP2AOutput, calculateBumpReserve } from "$lib/p2a";
 
 const bc = rpc(config.bitcoin);
 const lq = rpc(config.liquid);
@@ -710,10 +711,15 @@ export const sendOnchain = async (params) => {
     return sendNonCustodial(params);
   }
 
-  if (!hex) ({ hex } = await build(params));
+  let buildResult;
+  if (!hex) {
+    buildResult = await build(params);
+    hex = buildResult.hex;
+  }
 
   const { tx, type } = await decode(hex);
   const node = rpc(config[type]);
+  const isBitcoin = type === PaymentType.bitcoin;
   let { txid } = tx;
 
   try {
@@ -737,6 +743,7 @@ export const sendOnchain = async (params) => {
     let total = 0;
     let fee = 0;
     let change = 0;
+    let p2aVout = -1;
 
     if (type === PaymentType.liquid) {
       for (const {
@@ -764,15 +771,19 @@ export const sendOnchain = async (params) => {
         totalIn += sats(tx.vout[vout].value);
       }
 
-      for (const {
-        scriptPubKey: { address },
-        value,
-      } of tx.vout) {
+      for (let i = 0; i < tx.vout.length; i++) {
+        const { scriptPubKey, value } = tx.vout[i];
+
+        if (isP2AOutput(scriptPubKey.hex)) {
+          p2aVout = i;
+          continue;
+        }
+
         total += sats(value);
-        const invoice = await getInvoice(address);
+        const invoice = await getInvoice(scriptPubKey.address);
         if (invoice?.aid === aid) fail("Cannot send to internal address");
 
-        if ((await node.getAddressInfo(address)).ismine) {
+        if ((await node.getAddressInfo(scriptPubKey.address)).ismine) {
           change += sats(value);
         }
       }
@@ -781,21 +792,36 @@ export const sendOnchain = async (params) => {
     }
 
     const amount = total - change;
+    const bumpReserve = buildResult?.bumpReserve || 0;
+    const parentVsize = buildResult?.parentVsize || 0;
 
     const p = await debit({
       aid,
       hash: txid,
       amount,
-      fee,
+      fee: fee + bumpReserve,
       rate,
       user,
       type,
     });
 
+    p.fee = fee;
     p.hex = hex;
+
+    if (isBitcoin && bumpReserve > 0) {
+      (p as any).bumpReserve = bumpReserve;
+      (p as any).p2aVout = p2aVout;
+      (p as any).parentVsize = parentVsize;
+      p.confirmed = false;
+    }
+
     await s(`payment:${p.id}`, p);
 
     await node.sendRawTransaction(hex);
+
+    if (isBitcoin && bumpReserve > 0) {
+      await db.sAdd("outgoing:unconfirmed", p.id);
+    }
 
     delete inflight[txid];
     return p;
@@ -1126,6 +1152,8 @@ export const build = async ({
   }
 
   const node = rpc(config[type]);
+  const isBitcoin = type === PaymentType.bitcoin;
+  const p2aAddress = isBitcoin ? getP2AAddress() : null;
 
   amount = Number.parseInt(amount);
   if (amount < 0) fail("invalid amount");
@@ -1135,7 +1163,7 @@ export const build = async ({
       ? { fastestFee: 0.1, halfHourFee: 0.1, hourFee: 0.1 }
       : await fetch(`${api[type]}/fees/recommended`).then((r) => r.json());
 
-  if (type === PaymentType.bitcoin) {
+  if (isBitcoin) {
     fees.hourFee = fees.halfHourFee;
     fees.halfHourFee = fees.fastestFee;
     fees.fastestFee = Math.ceil(fees.fastestFee * 1.5);
@@ -1145,19 +1173,27 @@ export const build = async ({
     feeRate = fees.halfHourFee;
   }
 
-  if (feeRate < fees.hourFee) fail("fee rate too low");
+  if (isBitcoin) {
+    if (feeRate < 0.1) fail("fee rate too low");
+  } else {
+    if (feeRate < fees.hourFee) fail("fee rate too low");
+  }
 
   const replaceable = false;
 
-  let outs = [{ [address]: btc(amount) }];
+  let outs: any[] = [{ [address]: btc(amount) }];
+  if (p2aAddress) outs.push({ [p2aAddress]: btc(P2A_VALUE) });
 
   if (type === PaymentType.liquid)
     outs = outs.map((o) => ({ ...o, asset: config.liquid.btc }));
 
   let raw = await node.createRawTransaction([], outs, 0, replaceable);
+  if (isBitcoin) raw = "03000000" + raw.substring(8);
 
   let fee = 0;
   let tx;
+  let bumpReserve = 0;
+  let parentVsize = 0;
 
   try {
     tx = await node.fundRawTransaction(raw, {
@@ -1167,6 +1203,12 @@ export const build = async ({
     });
 
     fee = sats(tx.fee);
+
+    if (isBitcoin) {
+      const decoded = await node.decodeRawTransaction(tx.hex);
+      parentVsize = decoded.vsize;
+      bumpReserve = calculateBumpReserve(feeRate, fees.fastestFee, parentVsize);
+    }
   } catch (e) {
     if (e.message.startsWith("Insufficient")) subtract = true;
     else throw e;
@@ -1178,16 +1220,23 @@ export const build = async ({
   const covered = Math.min(creditBal, ourfee);
   ourfee -= covered;
 
-  if (subtract || amount + fee + ourfee > balance) {
+  if (subtract || amount + fee + ourfee + bumpReserve > balance) {
     subtract = true;
-    if (amount <= fee + ourfee + dust) {
-      fail(
-        `insufficient funds ⚡️${balance} of ⚡️${amount + fee + ourfee + dust}`,
-      );
+
+    if (isBitcoin && parentVsize === 0) {
+      parentVsize = 200;
+      bumpReserve = calculateBumpReserve(feeRate, fees.fastestFee, parentVsize);
     }
 
-    outs = [{ [address]: btc(amount - ourfee) }];
+    if (amount <= fee + ourfee + bumpReserve + dust) {
+      fail(`insufficient funds ⚡️${balance} of ⚡️${amount + fee + ourfee + bumpReserve + dust}`);
+    }
+
+    outs = [{ [address]: btc(amount - ourfee - bumpReserve) }];
+    if (p2aAddress) outs.push({ [p2aAddress]: btc(P2A_VALUE) });
+
     raw = await node.createRawTransaction([], outs, 0, replaceable);
+    if (isBitcoin) raw = "03000000" + raw.substring(8);
 
     tx = await node.fundRawTransaction(raw, {
       fee_rate: feeRate,
@@ -1196,6 +1245,11 @@ export const build = async ({
     });
 
     fee = sats(tx.fee);
+
+    if (isBitcoin) {
+      const decoded = await node.decodeRawTransaction(tx.hex);
+      parentVsize = decoded.vsize;
+    }
   }
 
   const inputs = [];
@@ -1214,7 +1268,46 @@ export const build = async ({
     inputs.push({ witnessUtxo, path });
   }
 
-  return { feeRate, ourfee, fee, fees, hex: tx.hex, inputs, subtract };
+  return { feeRate, ourfee, fee, fees, hex: tx.hex, inputs, subtract, bumpReserve, parentVsize };
+};
+
+export const checkOutgoingConfirmations = async () => {
+  try {
+    const paymentIds = await db.sMembers("outgoing:unconfirmed");
+    for (const pid of paymentIds) {
+      try {
+        const p = await gf(`payment:${pid}`);
+        if (!p) {
+          await db.sRem("outgoing:unconfirmed", pid);
+          continue;
+        }
+
+        if (p.confirmed) {
+          await db.sRem("outgoing:unconfirmed", pid);
+          continue;
+        }
+
+        const txInfo = await bc.getRawTransaction(p.hash, true).catch(() => null);
+        if (!txInfo || !txInfo.confirmations || txInfo.confirmations < 1) continue;
+
+        const refundAmount = (p.bumpReserve || 0) - (p.bumpedFee || 0);
+        if (refundAmount > 0) {
+          await tbRefund(p.uid, refundAmount);
+        }
+
+        p.confirmed = true;
+        p.bumpReserve = 0;
+        await s(`payment:${p.id}`, p);
+        await db.sRem("outgoing:unconfirmed", pid);
+        emit(p.uid, "payment", p);
+        l("outgoing confirmed", p.id, "refunded", refundAmount);
+      } catch (e) {
+        err("problem checking outgoing confirmation", pid, e.message);
+      }
+    }
+  } catch (e) {
+    err("checkOutgoingConfirmations failed", e.message);
+  }
 };
 
 export const catchUp = async () => {
@@ -1231,6 +1324,9 @@ export const catchUp = async () => {
         err("catchUp address check failed", address, e.message);
       }
     }
+
+    // Check custodial outgoing bitcoin tx confirmations
+    await checkOutgoingConfirmations();
 
     // Non-custodial accounts: check pending outgoing payments
     const inflightAccounts = await db.keys("inflight:*");
