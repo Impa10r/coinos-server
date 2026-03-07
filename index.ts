@@ -23,6 +23,7 @@ import { sendHeartbeat, websocket } from "$lib/sockets";
 import { initTigerBeetle } from "$lib/tb";
 import { startZmq } from "$lib/zmq";
 import { listenForDMs } from "$lib/dmNotifications";
+import { initMlsIndex } from "$lib/mls";
 
 import ecash from "$routes/ecash";
 import email from "$routes/email";
@@ -60,6 +61,7 @@ try {
 setTimeout(listenForLightning, 2000);
 setInterval(ensureListenerAlive, 120000);
 listenForDMs();
+initMlsIndex();
 setInterval(sendHeartbeat, 2000);
 
 app.get("/balances", info.balances);
@@ -82,6 +84,7 @@ app.post("/sign", auth, invoices.sign);
 app.get("/assetlinks.json", (_c) => {
   return new Response(Bun.file("assetlinks.json"));
 });
+app.get("/mls/users", nostr.mlsUsers);
 app.get("/nostr.json", nostr.identities);
 app.get("/profile/:profile", nostr.profile);
 app.get("/:pubkey/count", nostr.count);
