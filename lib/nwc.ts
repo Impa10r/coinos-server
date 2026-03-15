@@ -41,7 +41,7 @@ export default () => {
   let r: any;
 
   function connect() {
-    r = new Relay("ws://sf:7777", { reconnect: false });
+    r = new Relay(config.nostr, { reconnect: false });
 
     r.on("open", async (_) => {
       l("nwc connected to strfry");

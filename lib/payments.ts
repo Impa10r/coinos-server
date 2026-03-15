@@ -710,7 +710,7 @@ const sendNonCustodial = async (params) => {
 };
 
 export const sendOnchain = async (params) => {
-  let { aid, hex, rate, user, signed, feeRate } = params;
+  let { aid, hex, rate, user, signed, address: destAddress } = params;
   if (!aid) aid = user.id;
 
   // Non-custodial bitcoin account — use esplora
@@ -808,6 +808,9 @@ export const sendOnchain = async (params) => {
     let p2aVout = -1;
 
     if (type === PaymentType.liquid) {
+      const destUnconf = destAddress
+        ? (await node.getAddressInfo(destAddress)).unconfidential
+        : null;
       for (const {
         asset,
         scriptPubKey: { address, type },
@@ -818,7 +821,7 @@ export const sendOnchain = async (params) => {
         else {
           total += sats(value);
 
-          if (address) {
+          if (address && address !== destUnconf) {
             if ((await node.getAddressInfo(address)).ismine) {
               change += sats(value);
             }
@@ -845,7 +848,7 @@ export const sendOnchain = async (params) => {
         const invoice = await getInvoice(scriptPubKey.address);
         if (invoice?.aid === aid) fail("Cannot send to internal address");
 
-        if ((await node.getAddressInfo(scriptPubKey.address)).ismine) {
+        if (scriptPubKey.address !== destAddress && (await node.getAddressInfo(scriptPubKey.address)).ismine) {
           change += sats(value);
         }
       }

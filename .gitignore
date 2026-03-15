@@ -21,3 +21,5 @@ printer
 failedlogins.txt
 .claude
 req*
+.vscode/launch.json
+.vscode/tasks.json
