@@ -17,12 +17,6 @@ export const archive = createClient({
   },
 });
 
-export const arc2 = createClient({
-  url: config.arc2,
-  socket: {
-    reconnectStrategy: (retries) => Math.min(retries * 50, 5000),
-  },
-});
 
 async function dbReconnect() {
   try {

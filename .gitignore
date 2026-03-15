@@ -24,3 +24,4 @@ req*
 .vscode/launch.json
 .gitignore
 logs/balances.log
+.vscode/tasks.json
