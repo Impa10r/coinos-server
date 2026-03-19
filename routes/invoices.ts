@@ -32,6 +32,7 @@ export default {
     const { invoice } = body;
 
     if (body.user) user = body.user;
+    if (!user) return bail(c, "user not provided");
     if (c.get("user")?.username === user.username) invoice.own = true;
     else invoice.own = false;
 

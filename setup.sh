@@ -13,6 +13,7 @@ docker run --rm \
   ghcr.io/tigerbeetle/tigerbeetle:latest \
   format --cluster=0 --replica=0 --replica-count=1 /data/0_0.tigerbeetle
 
+docker-compose build --no-cache app
 docker compose up -d
 docker run -it -v $(pwd):/home/bun/app --entrypoint bun asoltys/coinos-server i
 docker exec -it bc bitcoin-cli createwallet coinos
