@@ -1,4 +1,4 @@
-FROM oven/bun
+FROM oven/bun:1.2
 
 ARG NODE_ENV=production
 
