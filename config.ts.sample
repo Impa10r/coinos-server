@@ -10,9 +10,9 @@ export default {
   },
   archive: "redis://arc",
   db: "redis://db",
-  nostr: "ws://nostr:8080",
+  nostr: "wss://relay.coinos.pro",
   relays: [
-    "ws://nostr:8080",
+    "wss://relay.coinos.pro",
     "wss://relay.primal.net",
     "wss://relay.damus.io",
     "wss://nostr-pub.wellorder.net",
@@ -21,6 +21,7 @@ export default {
     "wss://relay.nostr.bg",
     "wss://nostr.orangepill.dev"
   ],
+  publicRelay: "wss://relay.coinos.pro",
   jwt: "00d0ab4f7738a83feb37f661526512063c41e49278b7c32cba87314269a5788b",
   bitcoin: {
     host: "bc",
@@ -60,4 +61,8 @@ export default {
     scopes: ["MERCHANT_PROFILE_READ", "ORDERS_READ", "PAYMENTS_READ"],
   },
   tigerbeetle: { cluster_id: 0n, replica_addresses: ["tb:3000"] },
+  vapid: {
+    pk: "BFCcO7u4fpgDjWK-...",  // PUBLIC_VAPID_PUBKEY value
+    sk: "your-vapid-private-key",
+  },
 };
