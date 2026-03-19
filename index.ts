@@ -1,5 +1,6 @@
 import config from "$config";
-import app from "$lib/app";
+import baseApp from "$lib/app";
+const app = baseApp.basePath("/api");
 import { sendArk } from "$lib/ark";
 import { admin, auth, optional } from "$lib/auth";
 import { getDelegateInfo, receiveDelegation } from "$lib/delegator";
