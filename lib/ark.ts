@@ -248,7 +248,7 @@ let cachedArkBalance: any = null;
 
 export const getArkBalance = () => cachedArkBalance;
 
-export const verifyArkVtxo = async (hash: string) => {
+export const verifyArkVtxo = async (hash: string): Promise<{ found: boolean; amount: number }> => {
   const { bech32m } = await import("@scure/base");
   const serverAddr = await getArkAddress();
   const decoded = bech32m.decode(serverAddr, 1023);
@@ -258,5 +258,6 @@ export const verifyArkVtxo = async (hash: string) => {
     `${config.ark.arkServerUrl}/v1/indexer/vtxos?scripts=5120${vtxoHex}&spendable_only=true`,
   );
   const { vtxos } = (await r.json()) as any;
-  return vtxos?.some((v: any) => v.outpoint?.txid === hash) ?? false;
+  const vtxo = vtxos?.find((v: any) => v.outpoint?.txid === hash);
+  return { found: !!vtxo, amount: vtxo?.amount ?? 0 };
 };
