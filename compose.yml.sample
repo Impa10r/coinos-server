@@ -7,6 +7,7 @@ services:
         - arkd-wallet
     ports:
         - "7070:7070"
+        - "7071:7071"
     environment:
         - ARKD_LOG_LEVEL=6
         - ARKD_NO_MACAROONS=true
@@ -48,7 +49,7 @@ services:
       - tb
     security_opt:
       - seccomp:unconfined
-    command: "bun run dev"
+    command: ["bun", "index.ts"]
     environment:
       URL: http://localhost:5173
     ports:
@@ -85,6 +86,12 @@ services:
     ports:
       - '3010:3010'
       - '1984:1984'
+    healthcheck:
+      test: ["CMD", "lightning-cli", "getinfo"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     restart: always
   clb:
     image: elementsproject/lightningd:v25.05

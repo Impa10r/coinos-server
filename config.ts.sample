@@ -8,7 +8,7 @@ export default {
     arkServerPublicKey: "",
     arkPrivateKey: "",
   },
-  archive: "redis://arc",
+  archive: "redis://arc:6380",
   db: "redis://db",
   nostr: "wss://relay.coinos.pro",
   relays: [
@@ -65,4 +65,5 @@ export default {
     pk: "BFCcO7u4fpgDjWK-...",  // PUBLIC_VAPID_PUBKEY value
     sk: "your-vapid-private-key",
   },
+  recaptcha: "your_secret_key_here",
 };
