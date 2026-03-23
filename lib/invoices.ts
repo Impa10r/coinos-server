@@ -119,7 +119,7 @@ export const generate = async ({ invoice, user }) => {
         expiry,
         deschashonly: true,
         cltv: 19,
-        exposeprivate: true,
+        exposeprivatechannels: true,
       });
     }
 
