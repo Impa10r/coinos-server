@@ -47,6 +47,11 @@ export default {
   },
   lightning: "/home/bun/app/data/lightning/regtest/lightning-rpc",
   lightningb: "/home/bun/app/data/lightningb/regtest/lightning-rpc",
+  lnd: {
+    url: "https://lnd:8080",
+    macaroon: "/home/bun/app/data/lnd/data/chain/bitcoin/regtest/admin.macaroon",
+    tlsCert: "/home/bun/app/data/lnd/tls.cert",
+  },
   fee: {
     bitcoin: 0.004,   // 0.4%
     liquid: 0.001,    // 0.1%
