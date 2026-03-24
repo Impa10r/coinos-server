@@ -20,15 +20,21 @@ import lnd from "$lib/lnd";
 
 const outLn = {
   async xpay(args: any) {
+    l("cln: paying", args.invstring?.slice(-8), args.amount_msat, "maxfee", args.maxfee);
     try {
-      return await ln.xpay(args);
+      const r = await ln.xpay(args);
+      l("cln: paid", args.invstring?.slice(-8));
+      return r;
     } catch (e: any) {
-      if (lnd) {
-        warn("cln xpay failed, trying lnd", e.message);
+      warn("cln: failed", args.invstring?.slice(-8), e.message);
+      if (lnd && !e.message?.includes("already underway")) {
+        l("lnd: paying", args.invstring?.slice(-8), args.amount_msat, "maxfee", args.maxfee);
         try {
-          return await lnd.xpay(args);
+          const r = await lnd.payinvoice(args);
+          l("lnd: paid", args.invstring?.slice(-8));
+          return r;
         } catch (e2: any) {
-          warn("lnd xpay failed", e2.message);
+          warn("lnd: failed", args.invstring?.slice(-8), e2.message);
           throw e2;
         }
       }
@@ -1698,7 +1704,7 @@ export const check = async () => {
       }
       const p = await getPayment(pr);
       if (!p || Date.now() - p.created < 10000) continue;
-      const { pays } = await ln.listpays(pr);
+      const { pays } = await outLn.listpays(pr);
 
       const failed = !pays.length || pays.every((p) => p.status === "failed");
       const completed = pays.find((p) => p.status === "complete");
