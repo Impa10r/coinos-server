@@ -52,12 +52,9 @@ const outLn = {
     }
   },
   async listpays(bolt11: string) {
-    try {
-      return await ln.listpays(bolt11);
-    } catch (e) {
-      if (lnd) return await lnd.listpays(bolt11);
-      throw e;
-    }
+    const result = await ln.listpays(bolt11);
+    if (result.pays.length === 0 && lnd) return await lnd.listpays(bolt11);
+    return result;
   },
 };
 import { err, l, warn } from "$lib/logging";
@@ -1729,7 +1726,7 @@ const finalize = async (r, p) => {
   if (!preimage) fail("missing preimage");
 
   await db.sRem("pending", p.hash);
-  l("payment completed", p.id, r.payment_preimage);
+  l("payment completed", p.id, preimage);
   nwcNotify(p);
 
   const maxfee = p.fee;
