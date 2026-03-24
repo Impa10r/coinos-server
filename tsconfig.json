@@ -9,6 +9,7 @@
     "allowJs": true,
     "moduleResolution": "nodenext",
     "allowImportingTsExtensions": true,
+    "noEmit": true,
 
     // Best practices
     "strict": false,

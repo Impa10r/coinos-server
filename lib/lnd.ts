@@ -66,7 +66,7 @@ function makeLndClient() {
       return { pays };
     },
 
-    async xpay({ invstring, amount_msat, maxfee, retry_for }: {
+    async payinvoice({ invstring, amount_msat, maxfee, retry_for }: {
       invstring: string;
       amount_msat?: number;
       maxfee: number;

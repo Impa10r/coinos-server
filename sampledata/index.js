@@ -1,6 +1,4 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.default = {
+export default {
     port: 3119,
     nostr: "ws://nostr:8080",
     ipxapi: "4275|PqKjKaxIlzooToria2m4XFLzvHihSpsZMX4hvgxu",
@@ -16,4 +14,3 @@ exports.default = {
     },
     lightning: "/app/config/lightning/regtest/lightning-rpc",
 };
-//# sourceMappingURL=index.js.map
