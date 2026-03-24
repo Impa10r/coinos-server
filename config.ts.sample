@@ -47,7 +47,11 @@ export default {
   },
   lightning: "/home/bun/app/data/lightning/regtest/lightning-rpc",
   lightningb: "/home/bun/app/data/lightningb/regtest/lightning-rpc",
-  fee: 0.001,
+  fee: {
+    bitcoin: 0.004,   // 0.4%
+    liquid: 0.001,    // 0.1%
+    lightning: 0.001, // 0.1%
+  },
   adminpass: "pwa",
   txWebhookSecret: process.env.TX_WEBHOOK_SECRET || "pwa",
   support: "support@coinos.io",
