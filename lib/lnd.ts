@@ -83,7 +83,11 @@ function makeLndClient() {
 
       const r = await request("POST", "/v2/router/send", body);
 
-      if (r.status === "FAILED") throw new Error(r.failure_reason || "payment failed");
+      if (r.status === "FAILED") {
+        const lastHtlc = r.htlcs?.[r.htlcs.length - 1];
+        const detail = lastHtlc?.failure ? `${lastHtlc.failure.code} @hop${lastHtlc.failure.failure_source_index}` : "";
+        throw new Error(`${r.failure_reason} ${detail}`.trim());
+      }
 
       return {
         preimage: r.payment_preimage,
