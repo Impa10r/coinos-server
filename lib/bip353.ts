@@ -1,7 +1,7 @@
 import config from "$config";
 import { db, g, s } from "$lib/db";
 import ln from "$lib/ln";
-import { l, warn } from "$lib/logging";
+import { l } from "$lib/logging";
 import { v4 } from "uuid";
 import { PaymentType } from "$lib/types";
 
@@ -18,10 +18,9 @@ const createDnsRecord = async (username: string, bolt12: string) => {
   const name = `${username}.user._bitcoin-payment.${config.hostname}`;
   const content = `bitcoin:?lno=${bolt12}`;
 
-  const listRes = await fetch(
-    `${cfApi}/zones/${zoneId}/dns_records?type=TXT&name=${name}`,
-    { headers: cfHeaders() },
-  );
+  const listRes = await fetch(`${cfApi}/zones/${zoneId}/dns_records?type=TXT&name=${name}`, {
+    headers: cfHeaders(),
+  });
   const listData = (await listRes.json()) as any;
 
   if (listData.result?.length) {
@@ -45,10 +44,9 @@ const deleteDnsRecord = async (username: string) => {
   if (!apiToken || !zoneId) return;
 
   const name = `${username}.user._bitcoin-payment.${config.hostname}`;
-  const listRes = await fetch(
-    `${cfApi}/zones/${zoneId}/dns_records?type=TXT&name=${name}`,
-    { headers: cfHeaders() },
-  );
+  const listRes = await fetch(`${cfApi}/zones/${zoneId}/dns_records?type=TXT&name=${name}`, {
+    headers: cfHeaders(),
+  });
   const listData = (await listRes.json()) as any;
 
   for (const record of listData.result || []) {

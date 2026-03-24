@@ -17,16 +17,21 @@ export default {
     }
 
     try {
-      const ids = await db.geoSearch("locations:geo", {
-        longitude: lon,
-        latitude: lat,
-      }, {
-        radius,
-        unit: "km",
-      }, {
-        COUNT: count,
-        SORT: "ASC",
-      });
+      const ids = await db.geoSearch(
+        "locations:geo",
+        {
+          longitude: lon,
+          latitude: lat,
+        },
+        {
+          radius,
+          unit: "km",
+        },
+        {
+          COUNT: count,
+          SORT: "ASC",
+        },
+      );
 
       const locations = [];
       for (const id of ids) {

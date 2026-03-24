@@ -17,7 +17,6 @@ export const archive = createClient({
   },
 });
 
-
 async function dbReconnect() {
   try {
     await db.connect();

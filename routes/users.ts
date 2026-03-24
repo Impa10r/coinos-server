@@ -282,7 +282,8 @@ export default {
       }
 
       if (user.pin && !(pin === user.pin)) fail("Pin required");
-      if (typeof newpin !== "undefined" && (newpin.length === 6 || newpin.length === 64)) user.pin = newpin;
+      if (typeof newpin !== "undefined" && (newpin.length === 6 || newpin.length === 64))
+        user.pin = newpin;
       if (user.pin === "delete") user.pin = undefined;
 
       if (username) {
@@ -411,8 +412,7 @@ export default {
       if (!isAdmin) {
         let verified = false;
         try {
-          if (user?.password)
-            verified = await Bun.password.verify(password, user.password);
+          if (user?.password) verified = await Bun.password.verify(password, user.password);
         } catch (e) {}
 
         if (!user || !verified) {
@@ -492,8 +492,7 @@ export default {
       const username = rawUsername.toLowerCase().replace(/\s/g, "");
       let user = await getUser(username);
       if (!user) fail("User not found");
-      if (!user.authPubkey || user.authPubkey !== event.pubkey)
-        fail("Auth key mismatch");
+      if (!user.authPubkey || user.authPubkey !== event.pubkey) fail("Auth key mismatch");
 
       if (
         user.twofa &&
@@ -648,8 +647,8 @@ export default {
     await db.set(`${id}:lastlen`, len);
 
     let contacts = (await g(`${id}:contacts`)) || [];
-    const pins = [...await db.sMembers(`${id}:pins`)];
-    const trust = [...await db.sMembers(`${id}:trust`)];
+    const pins = [...(await db.sMembers(`${id}:pins`))];
+    const trust = [...(await db.sMembers(`${id}:trust`))];
 
     const paymentKeys = payments.reverse().map((pid) => `payment:${pid}`);
     const fetched = await gfAll(paymentKeys);
@@ -1192,7 +1191,7 @@ export default {
 
   async apps(c) {
     const user = c.get("user");
-    const pubkeys = [...await db.sMembers(`${user.id}:apps`)];
+    const pubkeys = [...(await db.sMembers(`${user.id}:apps`))];
     const apps = await Promise.all(pubkeys.map((p) => g(`app:${p}`)));
 
     const lud16 = `${user.username}@${host}`;

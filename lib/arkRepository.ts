@@ -1,22 +1,19 @@
 import type {
   WalletRepository,
-  WalletState,
   ContractRepository,
-  ContractFilter,
   ExtendedVirtualCoin,
   ExtendedCoin,
   ArkTransaction,
   Contract,
 } from "@arkade-os/sdk";
+
+type WalletState = any;
+type ContractFilter = any;
 import { db } from "$lib/db";
 
 const PREFIX = "ark:repo";
 
-function mergeByKey<T>(
-  existing: T[],
-  incoming: T[],
-  toKey: (item: T) => string,
-): T[] {
+function mergeByKey<T>(existing: T[], incoming: T[], toKey: (item: T) => string): T[] {
   const next = new Map<string, T>();
   for (const item of existing) next.set(toKey(item), item);
   for (const item of incoming) next.set(toKey(item), item);
@@ -108,9 +105,7 @@ export class ValkeyContractRepository implements ContractRepository {
 
     const matches = <T>(value: T, criterion?: T | T[]) => {
       if (criterion === undefined) return true;
-      return Array.isArray(criterion)
-        ? criterion.includes(value)
-        : value === criterion;
+      return Array.isArray(criterion) ? criterion.includes(value) : value === criterion;
     };
 
     return all.filter(

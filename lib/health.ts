@@ -40,14 +40,16 @@ async function checkLightningHealth(): Promise<boolean> {
   const startTime = Date.now();
 
   try {
-    const info = await withTimeout(ln.getinfo(), RPC_TIMEOUT, "getinfo") as any;
+    l("health check: testing lightning connection...");
+    const info = (await withTimeout(ln.getinfo(), RPC_TIMEOUT, "getinfo")) as any;
+
 
     if (!info?.id) {
       throw new Error("getinfo returned invalid response (no node id)");
     }
 
     const testLabel = `health_check_${Date.now()}`;
-    const invoice = await withTimeout(
+    const invoice = (await withTimeout(
       ln.invoice({
         amount_msat: "1000msat",
         label: testLabel,
@@ -56,7 +58,7 @@ async function checkLightningHealth(): Promise<boolean> {
       }),
       RPC_TIMEOUT,
       "invoice",
-    ) as any;
+    )) as any;
 
     if (!invoice?.bolt11) {
       throw new Error("invoice creation returned invalid response");

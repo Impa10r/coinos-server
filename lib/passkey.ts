@@ -11,8 +11,7 @@ import { fail } from "$lib/utils";
 import { v4 } from "uuid";
 
 const rpName = "coinos";
-const androidOrigin =
-  "android:apk-key-hash:DaYNHto1fsy7jrhOfRaDDy4HCRNqFo8H0gf3DmW7bOw";
+const androidOrigin = "android:apk-key-hash:DaYNHto1fsy7jrhOfRaDDy4HCRNqFo8H0gf3DmW7bOw";
 
 function getRpID(origin: string) {
   try {

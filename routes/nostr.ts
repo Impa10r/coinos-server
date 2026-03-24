@@ -1,16 +1,7 @@
 import { db, g } from "$lib/db";
 import ln from "$lib/ln";
 import { getMlsUsers } from "$lib/mls";
-import {
-  EX,
-  get,
-  getCount,
-  getNostrUser,
-  getProfile,
-  publish,
-  q,
-  serverPubkey,
-} from "$lib/nostr";
+import { EX, get, getCount, getNostrUser, getProfile, publish, q, serverPubkey } from "$lib/nostr";
 import { parseContent } from "$lib/notes";
 import { scan } from "$lib/strfry";
 import { bail, fail, fields, getUser } from "$lib/utils";

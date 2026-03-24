@@ -221,11 +221,11 @@ export default {
       for (const pid of missingIds) await db.lRem(listKey, 0, pid);
     }
 
-    const internalRefs = [...new Set(
-      validPayments
-        .filter((p) => p.type === PaymentType.internal && p.ref)
-        .map((p) => p.ref),
-    )];
+    const internalRefs = [
+      ...new Set(
+        validPayments.filter((p) => p.type === PaymentType.internal && p.ref).map((p) => p.ref),
+      ),
+    ];
 
     if (internalRefs.length) {
       const userKeys = internalRefs.map((ref) => `user:${ref}`);
@@ -335,13 +335,13 @@ export default {
 
   async funds(c) {
     const user = c.get("user");
-    const fundIds = [...await db.sMembers(`user:${user.id}:funds`)];
+    const fundIds = [...(await db.sMembers(`user:${user.id}:funds`))].map(String);
 
     const funds = await Promise.all(
       fundIds.map(async (id) => {
         const amount = await getFundBalance(id);
         if (amount === null) return null;
-        const managers = [...await db.sMembers(`fund:${id}:managers`)];
+        const managers = [...((await db.sMembers(`fund:${id}:managers`)) as string[])];
         return { id, amount, managed: managers.includes(user.id), managers: managers.length };
       }),
     );
@@ -360,7 +360,7 @@ export default {
 
     payments = payments.filter((p) => p);
 
-    const authIds = await db.lRange(`fund:${id}:authorizations`, 0, -1) || [];
+    const authIds = (await db.lRange(`fund:${id}:authorizations`, 0, -1)) || [];
     const allAuths = await Promise.all(authIds.map((authId) => g(`authorization:${authId}`)));
     const authorizations = allAuths.filter((a) => a && !a.claimed);
     return c.json({ amount, authorizations, payments });
@@ -372,7 +372,7 @@ export default {
     const body = await c.req.json();
     const { id, fiat, currency, amount } = body;
 
-    const managers = [...await db.sMembers(`fund:${id}:managers`)];
+    const managers = [...(await db.sMembers(`fund:${id}:managers`))];
     if (managers.length && !managers.includes(uid)) fail("Unauthorized");
 
     const authId = v4();
@@ -393,7 +393,7 @@ export default {
 
   async listAuthorizations(c) {
     const id = c.req.param("id");
-    const authIds = await db.lRange(`fund:${id}:authorizations`, 0, -1) || [];
+    const authIds = (await db.lRange(`fund:${id}:authorizations`, 0, -1)) || [];
     const allAuths = await Promise.all(authIds.map((authId) => g(`authorization:${authId}`)));
     const authorizations = allAuths.filter((a) => a && !a.claimed);
     return c.json(authorizations);
@@ -404,7 +404,7 @@ export default {
     const id = c.req.param("id");
     const authId = c.req.param("authId");
 
-    const managers = [...await db.sMembers(`fund:${id}:managers`)];
+    const managers = [...(await db.sMembers(`fund:${id}:managers`))];
     if (managers.length && !managers.includes(user.id)) fail("Unauthorized");
 
     const authorization = await g(`authorization:${authId}`);
@@ -439,7 +439,7 @@ export default {
         authorization = await g(`authorization:${authId}`);
         if (authorization && authorization.fundId !== id) authorization = null;
       } else {
-        const authIds = await db.lRange(`fund:${id}:authorizations`, 0, -1) || [];
+        const authIds = (await db.lRange(`fund:${id}:authorizations`, 0, -1)) || [];
         for (const aid of authIds) {
           const auth = await g(`authorization:${aid}`);
           if (auth && !auth.claimed) {
@@ -477,7 +477,7 @@ export default {
         l("funded fund", id);
       }
 
-      const managers = [...await db.sMembers(`fund:${id}:managers`)];
+      const managers = [...(await db.sMembers(`fund:${id}:managers`))];
       if (managers.length && !managers.includes(user.id)) fail("Unauthorized");
 
       const result: any = await tbFundDebit(id, amount, "Insufficient funds");
@@ -505,7 +505,7 @@ export default {
   async managers(c) {
     const name = c.req.param("name");
 
-    const ids = [...await db.sMembers(`fund:${name}:managers`)];
+    const ids = [...(await db.sMembers(`fund:${name}:managers`))];
 
     const managers = (await Promise.all(ids.map(async (id) => await getUser(id, fields)))).filter(
       Boolean,
@@ -521,7 +521,7 @@ export default {
 
     const k = `fund:${id}:managers`;
 
-    let managers: any[] = [...await db.sMembers(k)];
+    let managers: any[] = [...(await db.sMembers(k))];
     if (managers.length) {
       if (!managers.includes(user.id)) fail("Unauthorized");
     } else {
@@ -534,7 +534,7 @@ export default {
 
     await db.sAdd(k, uid);
 
-    const ids = [...await db.sMembers(k)];
+    const ids = [...(await db.sMembers(k))];
     if (!managers.length)
       managers = await Promise.all(ids.map(async (id) => await getUser(id, fields)));
 
@@ -549,7 +549,7 @@ export default {
       const user = c.get("user");
 
       const k = `fund:${name}:managers`;
-      let managers: any[] = [...await db.sMembers(k)];
+      let managers: any[] = [...(await db.sMembers(k))];
 
       if (managers.length) {
         if (!managers.includes(user.id)) fail("Unauthorized");
@@ -557,7 +557,7 @@ export default {
 
       await db.sRem(k, uid);
 
-      const ids = [...await db.sMembers(k)];
+      const ids = [...(await db.sMembers(k))];
       managers = await Promise.all(ids.map(async (id) => await getUser(id, fields)));
 
       return c.json(managers);
@@ -1118,7 +1118,7 @@ export default {
           }
 
           if (expectedBalance > balance && !hasRecentPayments) {
-            const p = await createArkPayment({
+            const p = (await createArkPayment({
               aid,
               uid,
               amount: balance - expectedBalance,
@@ -1127,7 +1127,7 @@ export default {
               currency,
               created: Date.now(),
               extraHashMappings: [],
-            }) as any;
+            })) as any;
             p.memo = "expired";
             await s(`payment:${p.id}`, p);
             payments.push(p);

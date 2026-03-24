@@ -1,5 +1,5 @@
 import config from "$config";
-import { db, g } from "$lib/db";
+import { db } from "$lib/db";
 import { l, warn } from "$lib/logging";
 import { getUser } from "$lib/utils";
 import { Relay } from "nostr-tools/relay";
@@ -19,9 +19,9 @@ const sendPush = async (pubkey: string, url = "/messages", event?: any) => {
     if (!user?.id) return;
 
     const subscriptions = await db.sMembers(`${user.id}:subscriptions`);
-    if (!subscriptions?.length) return;
+    if (!(subscriptions as string[])?.length) return;
 
-    l(`push to ${user.username} (${subscriptions.length} subs)`);
+    l(`push to ${user.username} (${(subscriptions as string[]).length} subs)`);
 
     const payloadObj: any = {
       title: "New message",
@@ -38,12 +38,10 @@ const sendPush = async (pubkey: string, url = "/messages", event?: any) => {
     const payload = JSON.stringify(payloadObj);
 
     for (const s of subscriptions as any) {
-      webpush
-        .sendNotification(JSON.parse(s as string), payload)
-        .catch((e) => {
-          warn("push failed", e.message);
-          db.sRem(`${user.id}:subscriptions`, s);
-        });
+      webpush.sendNotification(JSON.parse(s as string), payload).catch((e) => {
+        warn("push failed", e.message);
+        db.sRem(`${user.id}:subscriptions`, s);
+      });
     }
   } catch {
     // User not found — not a coinos user
@@ -96,10 +94,9 @@ const subscribeGroupRelay = (url: string) => {
 
   Relay.connect(url)
     .then((relay) => {
-      const sub = relay.subscribe(
-        [{ kinds: [445], since: Math.floor(Date.now() / 1000) }],
-        { onevent: handleGroupMessage },
-      );
+      const sub = relay.subscribe([{ kinds: [445], since: Math.floor(Date.now() / 1000) }], {
+        onevent: handleGroupMessage,
+      });
       groupRelaySubs.push(() => sub.close());
       l(`listening for group messages on ${url}`);
     })
@@ -111,7 +108,9 @@ const subscribeGroupRelay = (url: string) => {
 };
 
 /** Called when a client syncs its groups. Updates registry and subscribes to new relays. */
-export const syncGroups = async (groups: { nostrGroupId: string; members: string[]; relays: string[] }[]) => {
+export const syncGroups = async (
+  groups: { nostrGroupId: string; members: string[]; relays: string[] }[],
+) => {
   for (const g of groups) {
     groupRegistry.set(g.nostrGroupId, { members: g.members, relays: g.relays });
     for (const url of g.relays) subscribeGroupRelay(url);
@@ -164,14 +163,19 @@ const loadRegistry = async () => {
 };
 
 /** Called from syncGroups to persist after updates */
-export const syncGroupsAndSave = async (groups: { nostrGroupId: string; members: string[]; relays: string[] }[]) => {
+export const syncGroupsAndSave = async (
+  groups: { nostrGroupId: string; members: string[]; relays: string[] }[],
+) => {
   await syncGroups(groups);
   await saveRegistry();
 };
 
 export const listenForDMs = () => {
   // Subscribe to kind 1059 on configured relays
-  const relays = new Set([config.nostr, ...config.relays.filter((r: string) => r.startsWith("wss://"))]);
+  const relays = new Set([
+    config.nostr,
+    ...config.relays.filter((r: string) => r.startsWith("wss://")),
+  ]);
   for (const url of relays) subscribeInviteRelay(url);
 
   // Restore persisted group registry and subscribe to kind 445

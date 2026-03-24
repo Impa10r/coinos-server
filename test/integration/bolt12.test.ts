@@ -32,7 +32,6 @@ const clExec = async (container: string, ...args: string[]): Promise<any> => {
   }
 };
 
-
 const waitFor = async <T>(fn: () => Promise<T>, timeout = 30000): Promise<T> => {
   const start = Date.now();
   let lastError: any;

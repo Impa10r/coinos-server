@@ -65,10 +65,7 @@ export const receiveDelegation = async (body: any) => {
   // Parse valid_at from the intent message
   let validAt = Date.now();
   try {
-    const msg =
-      typeof intent.message === "string"
-        ? JSON.parse(intent.message)
-        : intent.message;
+    const msg = typeof intent.message === "string" ? JSON.parse(intent.message) : intent.message;
     if (msg.valid_at) validAt = msg.valid_at * 1000;
   } catch {}
 
@@ -83,9 +80,7 @@ export const receiveDelegation = async (body: any) => {
   };
 
   await db.set(`delegation:${id}`, JSON.stringify(delegation));
-  await db.zAdd("delegations:pending", [
-    { score: delegation.validAt, value: id },
-  ]);
+  await db.zAdd("delegations:pending", [{ score: delegation.validAt, value: id }]);
 
   l(
     "delegation received:",
@@ -101,11 +96,7 @@ export const processDelegations = async () => {
   if (processing || !delegatorPrivateKey) return;
 
   const now = Date.now();
-  const dueRaw = await db.zRangeByScore(
-    "delegations:pending",
-    "-inf",
-    String(now),
-  );
+  const dueRaw = await db.zRangeByScore("delegations:pending", "-inf", String(now));
   const dueIds = dueRaw.map(String);
   if (dueIds.length === 0) return;
 
@@ -129,9 +120,7 @@ export const processDelegations = async () => {
           } else {
             const retryAt = Date.now() + 5 * 60_000;
             await db.set(`delegation:${id}`, JSON.stringify(d));
-            await db.zAdd("delegations:pending", [
-              { score: retryAt, value: id },
-            ]);
+            await db.zAdd("delegations:pending", [{ score: retryAt, value: id }]);
           }
         }
       }
@@ -224,9 +213,7 @@ function createDelegatorBatchHandler(
   let forfeitPubkey: string;
 
   return {
-    onBatchStarted: async (
-      event: BatchStartedEvent,
-    ): Promise<{ skip: boolean }> => {
+    onBatchStarted: async (event: BatchStartedEvent): Promise<{ skip: boolean }> => {
       const utf8IntentId = new TextEncoder().encode(intentId);
       const intentIdHash = hex.encode(sha256Hash(utf8IntentId));
 
@@ -261,9 +248,7 @@ function createDelegatorBatchHandler(
       vtxoTree: TxTree,
     ): Promise<{ skip: boolean }> => {
       // Check if we're a cosigner in this round
-      const xOnlyPublicKeys = event.cosignersPublicKeys.map((k: string) =>
-        k.slice(2),
-      );
+      const xOnlyPublicKeys = event.cosignersPublicKeys.map((k: string) => k.slice(2));
       const signerPublicKey = await session.getPublicKey();
       const xonlySignerPublicKey = signerPublicKey.subarray(1);
 
@@ -276,9 +261,7 @@ function createDelegatorBatchHandler(
       }
 
       // Validate the vtxo tree
-      const commitmentTx = Transaction.fromPSBT(
-        base64.decode(event.unsignedCommitmentTx),
-      );
+      const commitmentTx = Transaction.fromPSBT(base64.decode(event.unsignedCommitmentTx));
       validateVtxoTxGraph(vtxoTree, commitmentTx, sweepTapTreeRoot);
 
       const sharedOutput = commitmentTx.getOutput(0);
@@ -295,13 +278,8 @@ function createDelegatorBatchHandler(
       return { skip: false };
     },
 
-    onTreeNonces: async (
-      event: TreeNoncesEvent,
-    ): Promise<{ fullySigned: boolean }> => {
-      const { hasAllNonces } = await session.aggregatedNonces(
-        event.txid,
-        event.nonces,
-      );
+    onTreeNonces: async (event: TreeNoncesEvent): Promise<{ fullySigned: boolean }> => {
+      const { hasAllNonces } = await session.aggregatedNonces(event.txid, event.nonces);
       if (!hasAllNonces) return { fullySigned: false };
 
       const signatures = await session.sign();

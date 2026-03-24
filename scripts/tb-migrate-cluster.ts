@@ -32,7 +32,6 @@ const creditLedger: Record<string, number> = {
   liquid: LEDGER_CREDIT_LQ,
 };
 
-
 function uuidToBigInt(uuid: string): bigint {
   return BigInt(`0x${uuid.replace(/-/g, "")}`);
 }
