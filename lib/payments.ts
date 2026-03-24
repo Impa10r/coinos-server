@@ -16,6 +16,42 @@ import {
 import { HDKey } from "@scure/bip32";
 import { generate } from "$lib/invoices";
 import ln from "$lib/ln";
+import lnd from "$lib/lnd";
+
+const outLn = {
+  async xpay(args: any) {
+    try {
+      return await ln.xpay(args);
+    } catch (e) {
+      if (lnd) return await lnd.xpay(args);
+      throw e;
+    }
+  },
+  async keysend(args: any) {
+    try {
+      return await ln.keysend(args);
+    } catch (e) {
+      if (lnd) return await lnd.keysend(args);
+      throw e;
+    }
+  },
+  async listpeerchannels() {
+    try {
+      return await ln.listpeerchannels();
+    } catch (e) {
+      if (lnd) return await lnd.listpeerchannels();
+      throw e;
+    }
+  },
+  async listpays(bolt11: string) {
+    try {
+      return await ln.listpays(bolt11);
+    } catch (e) {
+      if (lnd) return await lnd.listpays(bolt11);
+      throw e;
+    }
+  },
+};
 import { err, l, warn } from "$lib/logging";
 import { handleZap } from "$lib/nostr";
 import { notify, nwcNotify } from "$lib/notifications";
@@ -951,7 +987,7 @@ export const sendKeysend = async ({
   });
 
   try {
-    return await ln.keysend({
+    return await outLn.keysend({
       destination: pubkey,
       amount_msat: amount * 1000,
       maxfee: fee * 1000,
@@ -981,14 +1017,14 @@ export const sendLightning = async ({ user, pr, amount, fee = undefined, memo = 
     payee = invoice_node_id;
   }
 
-  const { channels } = await ln.listpeerchannels();
+  const { channels } = await outLn.listpeerchannels();
   const isDirect = channels.some((c) => c.peer_id === payee);
   const minfee = isDirect ? 0 : Math.max(Math.round(amount * 0.005), 5);
 
   fee = Math.max(Number.parseInt(fee || 0), minfee);
   if (fee < 0) fail("Fee cannot be negative");
 
-  const { pays } = await ln.listpays(pr);
+  const { pays } = await outLn.listpays(pr);
   if (pays.find((p) => p.status === "complete")) fail("Invoice has already been paid");
 
   if (pays.find((p) => p.status === "pending")) fail("Payment is already underway");
@@ -1007,9 +1043,8 @@ export const sendLightning = async ({ user, pr, amount, fee = undefined, memo = 
   l("paying lightning invoice", pr.substr(-8), amount, fee);
 
   try {
-    const r = await ln.xpay({
+    const r = await outLn.xpay({
       invstring: pr.replace(/\s/g, "").toLowerCase(),
-      // bolt11: pr.replace(/\s/g, "").toLowerCase(),
       amount_msat: amount_msat ? undefined : amount * 1000,
       maxfee: fee * 1000,
       retry_for: 20,

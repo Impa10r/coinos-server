@@ -45,6 +45,7 @@ services:
       - db
       - bc
       - cl
+      - lnd
       - sf
       - tb
     security_opt:
@@ -60,6 +61,7 @@ services:
       - ./logs:/logs
       - ./data/bitcoin/bitcoin.conf:/bitcoin.conf
       - ./data/sockets:/sockets
+      - ./data/lnd:/home/bun/app/data/lnd
       - ./mklittlefs:/usr/bin/mklittlefs
     restart: always
   bc:
@@ -76,6 +78,17 @@ services:
     restart: always
     ports:
       - 7043:7040
+  lnd:
+    image: lightninglabs/lnd:v0.18.5-beta
+    container_name: lnd
+    user: 1000:1000
+    command: ["lnd", "--lnddir=/data/.lnd"]
+    volumes:
+      - ./data/lnd:/data/.lnd
+    ports:
+      - '9735:9735'
+      - '8080:8080'
+    restart: always
   cl:
     image: elementsproject/lightningd:v25.12.1
     container_name: cl
