@@ -1080,9 +1080,10 @@ export const sendLightning = async ({
   let minfee = Math.max(5, Math.round(amt * 0.005));
   const { channels } = await outLn.listpeerchannels();
   const isDirect = channels.some((c) => c.peer_id === payee);
-  const minfee = isDirect ? 0 : Math.max(Math.round(amount * 0.005), 5);
+  const minfee = isDirect ? 0 : Math.round(amount * 0.005);
 
-  fee = Math.max(Number.parseInt(fee) || minfee, minfee);
+  fee = Number.parseInt(fee) || minfee;
+
   if (fee < 0) fail("Fee cannot be negative");
 
   const { pays } = await outLn.listpays(pr);
