@@ -22,8 +22,16 @@ const outLn = {
   async xpay(args: any) {
     try {
       return await ln.xpay(args);
-    } catch (e) {
-      if (lnd) return await lnd.xpay(args);
+    } catch (e: any) {
+      if (lnd) {
+        warn("cln xpay failed, trying lnd", e.message);
+        try {
+          return await lnd.xpay(args);
+        } catch (e2: any) {
+          warn("lnd xpay failed", e2.message);
+          throw e2;
+        }
+      }
       throw e;
     }
   },
