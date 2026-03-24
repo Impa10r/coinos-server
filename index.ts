@@ -18,7 +18,7 @@ import {
   migrateToMicrosats,
 } from "$lib/migrate";
 import nwc from "$lib/nwc";
-import { catchUp, check } from "$lib/payments";
+import { catchUp, check, keepLndConnected } from "$lib/payments";
 import { getFx } from "$lib/rates";
 import { sendHeartbeat, websocket } from "$lib/sockets";
 import { initTigerBeetle } from "$lib/tb";
@@ -46,6 +46,7 @@ try {
   getFx();
   nwc();
   check();
+  keepLndConnected();
   startHealthCheck();
   startZmq();
   catchUp();
