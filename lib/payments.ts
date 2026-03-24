@@ -18,11 +18,12 @@ import { generate } from "$lib/invoices";
 import ln from "$lib/ln";
 import lnd from "$lib/lnd";
 
-const lndInFlight = new Set<string>();
+const inFlight = new Set<string>();
 
 const outLn = {
   async xpay(args: any) {
     l("cln: paying", args.invstring?.slice(-8), args.amount_msat, "maxfee", args.maxfee);
+    inFlight.add(args.invstring);
     try {
       const r = await ln.xpay(args);
       l("cln: paid", args.invstring?.slice(-8));
@@ -31,7 +32,6 @@ const outLn = {
       warn("cln: failed", args.invstring?.slice(-8), e.message);
       if (lnd && !e.message?.includes("already underway")) {
         l("lnd: paying", args.invstring?.slice(-8), args.amount_msat, "maxfee", args.maxfee);
-        lndInFlight.add(args.invstring);
         try {
           const r = await lnd.payinvoice(args);
           l("lnd: paid", args.invstring?.slice(-8));
@@ -39,11 +39,11 @@ const outLn = {
         } catch (e2: any) {
           warn("lnd: failed", args.invstring?.slice(-8), e2.message);
           throw e2;
-        } finally {
-          lndInFlight.delete(args.invstring);
         }
       }
       throw e;
+    } finally {
+      inFlight.delete(args.invstring);
     }
   },
   async keysend(args: any) {
@@ -1724,7 +1724,7 @@ export const check = async () => {
       }
       const p = await getPayment(pr);
       if (!p || Date.now() - p.created < 10000) continue;
-      if (lndInFlight.has(String(pr))) continue;
+      if (inFlight.has(String(pr))) continue;
       const { pays } = await outLn.listpays(String(pr));
 
       const failed = !pays.length || pays.every((p) => p.status === "failed");
