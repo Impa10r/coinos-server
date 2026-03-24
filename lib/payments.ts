@@ -1875,3 +1875,14 @@ const freezeCheck = async () => {
   setTimeout(freezeCheck, 10000);
 };
 setTimeout(freezeCheck, 10_000);
+
+export const keepLndConnected = async () => {
+  if (!lnd || !(config as any).lnd?.clnp2p) return;
+  try {
+    const { id } = await ln.getinfo();
+    await lnd.connectPeer(id, (config as any).lnd.clnp2p);
+  } catch (e: any) {
+    if (!e.message?.includes("already connected")) warn("lnd reconnect", e.message);
+  }
+  setTimeout(keepLndConnected, 60_000);
+};

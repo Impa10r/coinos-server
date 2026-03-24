@@ -118,6 +118,10 @@ function makeLndClient() {
       const r = await request("GET", `/v1/graph/routes/${destination}/${Math.ceil(amount_msat / 1000)}`);
       return { routes: r.routes || [] };
     },
+
+    async connectPeer(pubkey: string, host: string) {
+      await request("POST", "/v1/peers", { addr: { pubkey, host }, perm: true });
+    },
   };
 }
 
