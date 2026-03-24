@@ -18,7 +18,13 @@ app.use(
 );
 
 // Static files
-app.use("/public/*", serveStatic({ root: "/home/bun/app/data/uploads", rewriteRequestPath: (p) => p.replace("/public", "") }));
+app.use(
+  "/public/*",
+  serveStatic({
+    root: "/home/bun/app/data/uploads",
+    rewriteRequestPath: (p) => p.replace("/public", ""),
+  }),
+);
 
 // Rate limiting (disabled in development)
 const prod = process.env.NODE_ENV === "production";
@@ -44,7 +50,11 @@ if (prod) {
       gen.count++;
       if (gen.count > 2000) {
         return c.json(
-          { statusCode: 429, error: "Too Many Requests", message: "Rate limit exceeded, retry in 2 seconds" },
+          {
+            statusCode: 429,
+            error: "Too Many Requests",
+            message: "Rate limit exceeded, retry in 2 seconds",
+          },
           429,
         );
       }
@@ -100,7 +110,8 @@ app.use("*", async (c, next) => {
     "/contacts",
   ];
 
-  const shouldLog = !ignore.some((path) => url.startsWith(path)) &&
+  const shouldLog =
+    !ignore.some((path) => url.startsWith(path)) &&
     !(c.req.method === "GET" && url.startsWith("/users"));
 
   if (shouldLog) {

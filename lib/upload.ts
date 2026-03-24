@@ -22,7 +22,9 @@ export default async (c) => {
     const w = type === "banner" ? 1920 : 240;
     buf = await sharp(buf, { failOnError: false }).rotate().resize(w).webp().toBuffer();
 
-    const hash = createHash("sha256").update(buf as any).digest("hex");
+    const hash = createHash("sha256")
+      .update(buf as any)
+      .digest("hex");
 
     const filePath = `/home/bun/app/data/uploads/${hash}.webp`;
     writeFileSync(filePath, buf as any);

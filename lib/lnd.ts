@@ -59,14 +59,20 @@ function makeLndClient() {
       const pays = (r.payments || [])
         .filter((p: any) => p.payment_request === bolt11)
         .map((p: any) => ({
-          status: p.status === "SUCCEEDED" ? "complete" : p.status === "IN_FLIGHT" ? "pending" : "failed",
+          status:
+            p.status === "SUCCEEDED" ? "complete" : p.status === "IN_FLIGHT" ? "pending" : "failed",
           amount_sent_msat: parseInt(p.value_msat) + parseInt(p.fee_msat),
           preimage: p.payment_preimage,
         }));
       return { pays };
     },
 
-    async payinvoice({ invstring, amount_msat, maxfee, retry_for }: {
+    async payinvoice({
+      invstring,
+      amount_msat,
+      maxfee,
+      retry_for,
+    }: {
       invstring: string;
       amount_msat?: number;
       maxfee: number;
@@ -85,7 +91,9 @@ function makeLndClient() {
 
       if (r.status === "FAILED") {
         const lastHtlc = r.htlcs?.[r.htlcs.length - 1];
-        const detail = lastHtlc?.failure ? `${lastHtlc.failure.code} @hop${lastHtlc.failure.failure_source_index}` : "";
+        const detail = lastHtlc?.failure
+          ? `${lastHtlc.failure.code} @hop${lastHtlc.failure.failure_source_index}`
+          : "";
         throw new Error(`${r.failure_reason} ${detail}`.trim());
       }
 
@@ -114,8 +122,11 @@ function makeLndClient() {
       return { id: r.identity_pubkey };
     },
 
-    async getroutes({ source, destination, amount_msat }: any) {
-      const r = await request("GET", `/v1/graph/routes/${destination}/${Math.ceil(amount_msat / 1000)}`);
+    async getroutes({ source: _source, destination, amount_msat }: any) {
+      const r = await request(
+        "GET",
+        `/v1/graph/routes/${destination}/${Math.ceil(amount_msat / 1000)}`,
+      );
       return { routes: r.routes || [] };
     },
 

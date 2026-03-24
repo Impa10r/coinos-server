@@ -30,13 +30,11 @@ const register = async (username: string, password: string): Promise<any> => {
   return res.json() as any;
 };
 
-
 const createInvoice = (token: string, invoice: any) =>
   api("/invoice", token, {
     method: "POST",
     body: JSON.stringify({ invoice }),
   });
-
 
 // =====================================================================
 // Test state
@@ -68,7 +66,7 @@ beforeAll(async () => {
     body: JSON.stringify({ type: "ark", name: "ark vault" }),
   });
   if (res.ok) {
-    const account = await res.json() as any;
+    const account = (await res.json()) as any;
     arkAccountId = account.id;
   } else {
     // Fallback: use user's own ID as the account

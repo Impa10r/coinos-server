@@ -11,9 +11,11 @@ import { Relay } from "nostr-tools/relay";
 export const EX = 60 * 60 * 24;
 const coinos = await Relay.connect(config.nostr);
 
-export const serverSecret = bytesToHex(nip19.decode(config.nostrKey).data as Uint8Array);
+export const serverSecret = bytesToHex(nip19.decode(config.nostrKey).data as unknown as Uint8Array);
 
-export const serverSecret2 = bytesToHex(nip19.decode(config.nostrKey2).data as Uint8Array);
+export const serverSecret2 = bytesToHex(
+  nip19.decode(config.nostrKey2).data as unknown as Uint8Array,
+);
 
 export const serverPubkey = getPublicKey(hexToBytes(serverSecret));
 export const serverPubkey2 = getPublicKey(hexToBytes(serverSecret2));

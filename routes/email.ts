@@ -14,14 +14,14 @@ export default {
       const Charset = "UTF-8";
 
       const { recaptcha: secret } = config;
-      const { success } = await got
+      const { success } = (await got
         .post("https://www.google.com/recaptcha/api/siteverify", {
           form: {
             secret,
             response,
           },
         })
-        .json() as any;
+        .json()) as any;
 
       if (success || response === config.adminpass) {
         body.token = undefined;

@@ -22,7 +22,7 @@ export default {
     const url = `https://${domain}/.well-known/lnurlp/${name.toLowerCase().replace(/\s/g, "")}`;
 
     try {
-      const r = await got(url).json() as any;
+      const r = (await got(url).json()) as any;
       if (r.tag !== "payRequest") fail("not an ln address");
     } catch (e) {
       const m = `failed to lookup lightning address ${address}`;
@@ -193,8 +193,7 @@ export default {
         return c.json({ status: "ERROR", reason: `Insufficient funds: ${balance} < ${amount}` });
 
       const result: any = await tbFundDebit(fundId, amount, "Insufficient funds");
-      if (result.err)
-        return c.json({ status: "ERROR", reason: result.err });
+      if (result.err) return c.json({ status: "ERROR", reason: result.err });
 
       l("lnurlw paying invoice from fund", fundId, amount);
 

@@ -41,7 +41,7 @@ let failedBoardingOutpoints = new Set<string>();
 const FAILED_BOARDING_KEY = "ark:failedBoardingOutpoints";
 const loadFailedOutpoints = async () => {
   const members = await db.sMembers(FAILED_BOARDING_KEY);
-  failedBoardingOutpoints = new Set(members);
+  failedBoardingOutpoints = new Set([...members].map(String));
 };
 loadFailedOutpoints();
 
@@ -116,7 +116,15 @@ export const refreshArkWallet = async (force = false) => {
         const expiring = allExpiring.filter((v: any) => v.value > Number(info.dust));
         if (expiring.length > 0) {
           const expiringTotal = expiring.reduce((s: number, v: any) => s + v.value, 0);
-          l("ark renewing", expiring.length, "expiring vtxos, total:", expiringTotal, "sats (skipped", allExpiring.length - expiring.length, "dust)");
+          l(
+            "ark renewing",
+            expiring.length,
+            "expiring vtxos, total:",
+            expiringTotal,
+            "sats (skipped",
+            allExpiring.length - expiring.length,
+            "dust)",
+          );
           const txid = await withTimeout(manager.renewVtxos(), 60_000, "ark renewal");
           l("ark renewed vtxos, txid:", txid);
           await logArkOp("renewal", { txid, vtxoCount: expiring.length, amount: expiringTotal });
@@ -156,17 +164,29 @@ export const refreshArkWallet = async (force = false) => {
       for (const utxo of sorted) {
         try {
           const txid = await withTimeout(
-            ramps.onboard(info.fees, [utxo], undefined, (event) => l("ark onboard event:", JSON.stringify(event, (_, v) => typeof v === "bigint" ? v.toString() : v))),
+            ramps.onboard(info.fees, [utxo], undefined, (event) =>
+              l(
+                "ark onboard event:",
+                JSON.stringify(event, (_, v) => (typeof v === "bigint" ? v.toString() : v)),
+              ),
+            ),
             60_000,
             "ark onboard",
           );
           l("ark onboarded boarding utxo:", utxo.value, "sats, txid:", txid);
-          await logArkOp("onboard", { txid, amount: utxo.value, boardingTxid: utxo.txid, vout: utxo.vout });
+          await logArkOp("onboard", {
+            txid,
+            amount: utxo.value,
+            boardingTxid: utxo.txid,
+            vout: utxo.vout,
+          });
           failedBoardingOutpoints.clear();
           await db.del(FAILED_BOARDING_KEY);
           break;
         } catch (e: any) {
-          const retriable = /not enough intent confirmations|timed out|signing_session/i.test(e.message);
+          const retriable = /not enough intent confirmations|timed out|signing_session/i.test(
+            e.message,
+          );
           if (!retriable) {
             failedBoardingOutpoints.add(outpointKey(utxo));
             await db.sAdd(FAILED_BOARDING_KEY, outpointKey(utxo));
@@ -188,7 +208,6 @@ export const refreshArkWallet = async (force = false) => {
 setTimeout(refreshArkWallet, 300_000);
 setInterval(() => refreshArkWallet(), 300_000);
 
-
 export const sendArk = async (address: string, amount: number) => {
   const timeout = new Promise((_, reject) =>
     setTimeout(() => reject(new Error("Ark send timed out")), 60000),
@@ -200,7 +219,12 @@ export const sendArk = async (address: string, amount: number) => {
       await logArkOp("send", { txid, address, amount });
       return txid;
     } catch (e: any) {
-      if (/insufficient funds/i.test(e.message) || /VTXO_RECOVERABLE/i.test(e.message) || /VTXO_ALREADY_SPENT/i.test(e.message) || /VTXO_ALREADY_REGISTERED/i.test(e.message)) {
+      if (
+        /insufficient funds/i.test(e.message) ||
+        /VTXO_RECOVERABLE/i.test(e.message) ||
+        /VTXO_ALREADY_SPENT/i.test(e.message) ||
+        /VTXO_ALREADY_REGISTERED/i.test(e.message)
+      ) {
         l("ark send failed:", e.message, "— recreating wallet and retrying");
         wallet = null;
         await refreshArkWallet(true);
@@ -233,6 +257,6 @@ export const verifyArkVtxo = async (hash: string) => {
   const r = await fetch(
     `${config.ark.arkServerUrl}/v1/indexer/vtxos?scripts=5120${vtxoHex}&spendable_only=true`,
   );
-  const { vtxos } = await r.json() as any;
+  const { vtxos } = (await r.json()) as any;
   return vtxos?.some((v: any) => v.outpoint?.txid === hash) ?? false;
 };

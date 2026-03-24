@@ -75,7 +75,8 @@ export async function createCpfpChild(payment: any, targetFeeRate: number) {
   let raw = await bc.createRawTransaction(inputs, outputs);
   raw = "03000000" + raw.substring(8);
 
-  if ((config.bitcoin as any).walletpass) await bc.walletPassphrase((config.bitcoin as any).walletpass, 300);
+  if ((config.bitcoin as any).walletpass)
+    await bc.walletPassphrase((config.bitcoin as any).walletpass, 300);
   const { hex } = await bc.signRawTransactionWithWallet(raw);
 
   const decoded = await bc.decodeRawTransaction(hex);
@@ -116,8 +117,16 @@ export async function createCpfpChild(payment: any, targetFeeRate: number) {
   payment.bumpedFee = childFee;
   await s(`payment:${payment.id}`, payment);
 
-  l("CPFP bump", parentTxid, "->", childTxid, "fee:", childFee,
-    "preserved outputs:", preservedOutputs.length);
+  l(
+    "CPFP bump",
+    parentTxid,
+    "->",
+    childTxid,
+    "fee:",
+    childFee,
+    "preserved outputs:",
+    preservedOutputs.length,
+  );
 
   return { txid: childTxid, childFee };
 }
@@ -269,7 +278,8 @@ export async function buildCpfpSend({
   raw = "03000000" + raw.substring(8);
 
   // Sign (only the change input needs signing; P2A is keyless)
-  if ((config.bitcoin as any).walletpass) await bc.walletPassphrase((config.bitcoin as any).walletpass, 300);
+  if ((config.bitcoin as any).walletpass)
+    await bc.walletPassphrase((config.bitcoin as any).walletpass, 300);
   const { hex } = await bc.signRawTransactionWithWallet(raw);
 
   const decoded = await bc.decodeRawTransaction(hex);
@@ -289,8 +299,16 @@ export async function buildCpfpSend({
   parentPayment.bumpedFee = cpfpSubsidy;
   await s(`payment:${parentPayment.id}`, parentPayment);
 
-  l("CPFP+send via parent", parentTxid, "child:", decoded.txid, "subsidy:", cpfpSubsidy,
-    "payments:", paymentOutputs.length);
+  l(
+    "CPFP+send via parent",
+    parentTxid,
+    "child:",
+    decoded.txid,
+    "subsidy:",
+    cpfpSubsidy,
+    "payments:",
+    paymentOutputs.length,
+  );
 
   // Calculate User B's bump reserve for this child
   const fastestFee = Math.max(Math.ceil(fees.fastestFee * 1.5), 4);

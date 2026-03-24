@@ -11,7 +11,11 @@ await db.connect();
 
 const g = async (k: string) => {
   const v = await db.get(k);
-  try { return JSON.parse(v as string); } catch { return v; }
+  try {
+    return JSON.parse(v as string);
+  } catch {
+    return v;
+  }
 };
 
 // Load ark:ops log from Redis for matching
@@ -19,7 +23,7 @@ const rawOps = await db.lRange("ark:ops", 0, -1);
 const arkOps: Record<string, any> = {};
 for (const raw of rawOps) {
   try {
-    const op = JSON.parse(raw);
+    const op = JSON.parse(String(raw));
     if (op.txid) arkOps[op.txid] = op;
   } catch {}
 }
@@ -35,7 +39,10 @@ const provider = new RestArkProvider(arkServerUrl);
 const info = await provider.getInfo();
 
 console.log("=== Ark Server Fee Info ===");
-console.log("  Fees:", JSON.stringify(info.fees, (_, v) => typeof v === "bigint" ? v.toString() : v, 2));
+console.log(
+  "  Fees:",
+  JSON.stringify(info.fees, (_, v) => (typeof v === "bigint" ? v.toString() : v), 2),
+);
 console.log("  Dust:", info.dust.toString(), "sats");
 console.log();
 
@@ -55,8 +62,12 @@ console.log("  Total:               ", balance.total, "sats");
 console.log();
 
 // Build a time-indexed map for matching renewal pairs
-type TxEntry = typeof history[0] & { category?: string; matchedPayment?: any; renewalPairIdx?: number };
-const txs: TxEntry[] = history.map(tx => ({ ...tx }));
+type TxEntry = (typeof history)[0] & {
+  category?: string;
+  matchedPayment?: any;
+  renewalPairIdx?: number;
+};
+const txs: TxEntry[] = history.map((tx) => ({ ...tx }));
 
 // Index by commitment txid for pairing
 const byCommitment = new Map<string, TxEntry[]>();
@@ -79,18 +90,24 @@ for (const tx of txs) {
 // Pass 2: identify renewal pairs — SENT+RECEIVED sharing the same commitmentTxid
 let pairIdx = 0;
 for (const [, group] of byCommitment) {
-  const sent = group.filter(t => t.type === "SENT" && !t.category);
-  const recv = group.filter(t => t.type === "RECEIVED" && !t.category);
+  const sent = group.filter((t) => t.type === "SENT" && !t.category);
+  const recv = group.filter((t) => t.type === "RECEIVED" && !t.category);
   if (sent.length > 0 && recv.length > 0) {
-    for (const t of sent) { t.category = "renewal"; t.renewalPairIdx = pairIdx; }
-    for (const t of recv) { t.category = "renewal"; t.renewalPairIdx = pairIdx; }
+    for (const t of sent) {
+      t.category = "renewal";
+      t.renewalPairIdx = pairIdx;
+    }
+    for (const t of recv) {
+      t.category = "renewal";
+      t.renewalPairIdx = pairIdx;
+    }
     pairIdx++;
   }
 }
 
 // Pass 3: match renewal pairs by timestamp proximity (within 120s, similar amounts)
-const unmatchedSent = txs.filter(t => t.type === "SENT" && !t.category);
-const unmatchedRecv = txs.filter(t => t.type === "RECEIVED" && !t.category);
+const unmatchedSent = txs.filter((t) => t.type === "SENT" && !t.category);
+const unmatchedRecv = txs.filter((t) => t.type === "RECEIVED" && !t.category);
 const usedRecv = new Set<number>();
 
 for (const s of unmatchedSent) {
@@ -99,7 +116,10 @@ for (const s of unmatchedSent) {
     if (usedRecv.has(i)) continue;
     const r = unmatchedRecv[i];
     const rTs = r.createdAt > 1e12 ? r.createdAt / 1000 : r.createdAt;
-    if (Math.abs(sTs - rTs) < 120 && Math.abs(s.amount - r.amount) / Math.max(s.amount, r.amount) < 0.05) {
+    if (
+      Math.abs(sTs - rTs) < 120 &&
+      Math.abs(s.amount - r.amount) / Math.max(s.amount, r.amount) < 0.05
+    ) {
       s.category = "renewal";
       r.category = "renewal";
       s.renewalPairIdx = pairIdx;
@@ -123,7 +143,8 @@ for (const tx of txs) {
   for (const h of hashes) {
     const directPayment = await g(`payment:${h}`);
     if (directPayment) {
-      const payment = typeof directPayment === "string" ? await g(`payment:${directPayment}`) : directPayment;
+      const payment =
+        typeof directPayment === "string" ? await g(`payment:${directPayment}`) : directPayment;
       if (payment) {
         const user = payment.uid ? await g(`user:${payment.uid}`) : null;
         tx.category = "user-payment";
@@ -136,7 +157,7 @@ for (const tx of txs) {
   if (tx.category) continue;
 
   for (const h of hashes) {
-    const keys = await db.keys(`payment:*:${h}`);
+    const keys = (await db.keys(`payment:*:${h}`)).map(String);
     for (const key of keys) {
       const pid = await g(key);
       if (pid) {
@@ -253,8 +274,11 @@ console.log();
 console.log("=== Reconciliation by Category ===");
 console.log();
 
-let grandIn = 0, grandOut = 0;
-for (const [cat, { count, sent, received }] of Object.entries(totals).sort((a, b) => b[1].sent - a[1].sent)) {
+let grandIn = 0,
+  grandOut = 0;
+for (const [cat, { count, sent, received }] of Object.entries(totals).sort(
+  (a, b) => b[1].sent - a[1].sent,
+)) {
   const net = received - sent;
   grandIn += received;
   grandOut += sent;
@@ -262,7 +286,10 @@ for (const [cat, { count, sent, received }] of Object.entries(totals).sort((a, b
   if (received) console.log(`    received: +${received} sats`);
   if (sent) console.log(`    sent:     -${sent} sats`);
   console.log(`    net:       ${net >= 0 ? "+" : ""}${net} sats`);
-  if (cat === "renewal") console.log(`    fees:      ${sent - received} sats (from ${renewalPairs.size} renewal cycles)`);
+  if (cat === "renewal")
+    console.log(
+      `    fees:      ${sent - received} sats (from ${renewalPairs.size} renewal cycles)`,
+    );
   console.log();
 }
 
@@ -278,9 +305,7 @@ console.log("=== Fee Analysis ===");
 console.log();
 
 // Onboard fees: boarding amount that didn't arrive as VTXOs
-const onboardSent = totals["onboard"]?.sent || 0;
-const onboardRecv = totals["onboard"]?.received || 0;
-const onboardFees = onboardSent - onboardRecv; // usually 0 sent, so this may not apply
+// onboardFees = totals["onboard"]?.sent - totals["onboard"]?.received (usually 0 sent)
 // For onboards, fees = amount boarded on-chain minus amount received as VTXOs
 // We can't easily measure this without knowing the on-chain boarding amounts
 // But we can note what arrived
@@ -331,7 +356,9 @@ if (firstTx && lastTx) {
   console.log(`    History spans:          ${days.toFixed(1)} days`);
   if (days > 0) {
     console.log(`    Maintenance cost/day:   ${Math.round(totalMaintenanceCost / days)} sats/day`);
-    console.log(`    Maintenance cost/month: ${Math.round(totalMaintenanceCost / days * 30)} sats/month`);
+    console.log(
+      `    Maintenance cost/month: ${Math.round((totalMaintenanceCost / days) * 30)} sats/month`,
+    );
     console.log(`    Renewal cycles/day:     ${(renewalPairs.size / days).toFixed(1)}`);
   }
 }

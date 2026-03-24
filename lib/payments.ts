@@ -113,10 +113,9 @@ const dust = 547;
 
 const resolveBip353 = async (name: string, domain: string) => {
   const qname = `${name}.user._bitcoin-payment.${domain}`;
-  const res = await fetch(
-    `https://1.1.1.1/dns-query?name=${qname}&type=TXT`,
-    { headers: { accept: "application/dns-json" } },
-  );
+  const res = await fetch(`https://1.1.1.1/dns-query?name=${qname}&type=TXT`, {
+    headers: { accept: "application/dns-json" },
+  });
   const data = await res.json();
   if (!data.AD) return null; // DNSSEC validation failed
   if (!data.Answer?.length) return null;
@@ -208,7 +207,11 @@ export const debit = async ({
   const frozen = (await g("hardfreeze")) || ((await g("freeze")) && type !== PaymentType.internal);
   const skipServerLimit = type === PaymentType.fund || type === PaymentType.internal;
 
-  if (frozen || (userLimit != null && amount > userLimit && !whitelisted) || (!skipServerLimit && serverLimit != null && amount > serverLimit)) {
+  if (
+    frozen ||
+    (userLimit != null && amount > userLimit && !whitelisted) ||
+    (!skipServerLimit && serverLimit != null && amount > serverLimit)
+  ) {
     warn("Blocking", user.username, amount, hash, user.id, type, frozen, userLimit, serverLimit);
     fail("Problem sending payment");
   }
@@ -773,7 +776,17 @@ export const sendOnchain = async (params) => {
 
   // CPFP+send path: already signed, needs package submission
   if (buildResult?.signed) {
-    const { txid, parentHex, fee, bumpReserve, p2aVout, parentVsize, ourfee, cpfpParentId, cpfpSubsidy } = buildResult;
+    const {
+      txid,
+      parentHex,
+      fee,
+      bumpReserve,
+      p2aVout,
+      parentVsize,
+      ourfee: _ourfee,
+      cpfpParentId,
+      cpfpSubsidy: _cpfpSubsidy,
+    } = buildResult;
 
     try {
       if (inflight[txid]) fail("payment in flight");
@@ -895,7 +908,10 @@ export const sendOnchain = async (params) => {
         const invoice = await getInvoice(scriptPubKey.address);
         if (invoice?.aid === aid) fail("Cannot send to internal address");
 
-        if (scriptPubKey.address !== destAddress && (await node.getAddressInfo(scriptPubKey.address)).ismine) {
+        if (
+          scriptPubKey.address !== destAddress &&
+          (await node.getAddressInfo(scriptPubKey.address)).ismine
+        ) {
           change += sats(value);
         }
       }
@@ -1449,7 +1465,7 @@ export const catchUp = async () => {
             await db.sRem(key, pid);
             continue;
           }
-          const status = await getTxStatus(p.hash) as any;
+          const status = (await getTxStatus(p.hash)) as any;
           if (status.confirmed) {
             p.confirmed = true;
             await s(`payment:${p.id}`, p);
@@ -1482,8 +1498,6 @@ export const syncBitcoinVault = async (account, user) => {
   const internalAddrs = deriveAddresses(pubkey, fingerprint, count, true);
   const allAddrs = [...externalAddrs, ...internalAddrs];
   const addressSet = new Set(allAddrs);
-  const changeSet = new Set(internalAddrs);
-
   const utxos = await getAddressUtxos(allAddrs);
   const confirmedUtxos = utxos.filter((u) => u.status.confirmed && u.value >= 300);
   const pendingUtxos = utxos.filter((u) => !u.status.confirmed && u.value >= 300);
@@ -1698,13 +1712,13 @@ export const check = async () => {
     const payments = await db.sMembers("pending");
 
     for (const pr of payments) {
-      if (!pr.startsWith("ln")) {
+      if (!String(pr).startsWith("ln")) {
         await db.sRem("pending", pr);
         continue;
       }
       const p = await getPayment(pr);
       if (!p || Date.now() - p.created < 10000) continue;
-      const { pays } = await outLn.listpays(pr);
+      const { pays } = await outLn.listpays(String(pr));
 
       const failed = !pays.length || pays.every((p) => p.status === "failed");
       const completed = pays.find((p) => p.status === "complete");

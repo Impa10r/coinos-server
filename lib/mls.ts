@@ -58,8 +58,13 @@ async function backfill(): Promise<void> {
                   .then((r) => {
                     const found: Event[] = [];
                     r.subscribe([filter], {
-                      onevent(e) { found.push(e); },
-                      oneose() { r.close(); resolve(found); },
+                      onevent(e) {
+                        found.push(e);
+                      },
+                      oneose() {
+                        r.close();
+                        resolve(found);
+                      },
                     });
                   })
                   .catch(() => resolve([]));
@@ -85,7 +90,9 @@ async function backfill(): Promise<void> {
     if (oldest <= threeWeeksAgo) break;
     until = oldest;
 
-    l(`mls backfill pass ${pass}: ${knownPubkeys.size} users, oldest ${new Date(oldest * 1000).toISOString()}`);
+    l(
+      `mls backfill pass ${pass}: ${knownPubkeys.size} users, oldest ${new Date(oldest * 1000).toISOString()}`,
+    );
   }
 
   l(`mls backfill complete: ${knownPubkeys.size} users`);
