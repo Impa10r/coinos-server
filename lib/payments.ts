@@ -1082,7 +1082,8 @@ export const sendLightning = async ({
   const isDirect = channels.some((c) => c.peer_id === payee);
   const minfee = isDirect ? 0 : Math.round(amount * 0.005);
 
-  fee = Number.parseInt(fee) || minfee;
+  const parsedFee = Number.parseInt(fee);
+  fee = Number.isNaN(parsedFee) ? minfee : parsedFee;
 
   if (fee < 0) fail("Fee cannot be negative");
 
