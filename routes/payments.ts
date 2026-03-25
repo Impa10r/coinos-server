@@ -162,26 +162,24 @@ export default {
       }
     }
 
+    // Note: a missing payment is only logged, never removed from the list
+    // (upstream 13372a9e) — a transient lookup miss (e.g. archive-fallback
+    // lag) previously caused permanent, silent data loss when it deleted
+    // the reference from listKey.
     const paymentKeys = payments.map((pid) => `payment:${pid}`);
     const fetched = await gfAll(paymentKeys);
 
-    const missingIds: any[] = [];
     const validPayments: any[] = [];
 
     for (let i = 0; i < fetched.length; i++) {
       const p = fetched[i];
       if (!p) {
         warn("user", id, "missing payment", payments[i]);
-        missingIds.push(payments[i]);
         continue;
       }
       if (received && p.amount < 0) continue;
       if (p.created < start || p.created > end) continue;
       validPayments.push(p);
-    }
-
-    if (missingIds.length) {
-      for (const pid of missingIds) await db.lRem(listKey, 0, pid);
     }
 
     const internalRefs = [
