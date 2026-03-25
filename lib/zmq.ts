@@ -108,6 +108,7 @@ const handleRawBlock = async (raw: Uint8Array) => {
     const size = rawTxSize(raw, offset);
     const txRaw = raw.subarray(offset, offset + size);
     offset += size;
+    if (i === 0) continue; // skip coinbase
     try {
       await processWatchedTx(decodeTx(txRaw, true));
     } catch (e) {
