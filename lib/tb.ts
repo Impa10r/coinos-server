@@ -2,6 +2,9 @@ import config from "$config";
 import { warn } from "$lib/logging";
 import { createClient, CreateAccountError, AccountFlags, TransferFlags } from "tigerbeetle-node";
 import { createHash } from "crypto";
+import { appendFileSync, mkdirSync } from "fs";
+
+mkdirSync("logs", { recursive: true });
 
 let client: any;
 
@@ -212,6 +215,14 @@ function nextTransferId(): bigint {
   return u128(transferIdCounter);
 }
 
+async function logBalance(op: string, aid: string, delta: number) {
+  const account = await getAccount(balanceId(aid)).catch(() => null);
+  const balance = account ? accountBalance(account) : null;
+  const sign = delta >= 0 ? "+" : "";
+  const line = `${new Date().toISOString()} ${op} ${aid} ${sign}${delta} balance=${balance}\n`;
+  appendFileSync("logs/balances.log", line);
+}
+
 export async function tbDebit(
   aid: string,
   uid: string,
@@ -309,6 +320,7 @@ export async function tbDebit(
     } as any;
   }
 
+  logBalance("debit", aid, -(amount + tip + fee));
   return ourfee;
 }
 
@@ -366,6 +378,7 @@ export async function tbCredit(
   for (const r of results) {
     warn("TB credit transfer error:", r.index, r.result);
   }
+  logBalance("credit", aid, amount);
 }
 
 export async function tbConfirm(aid: string, amount: number) {
@@ -456,6 +469,7 @@ export async function tbReverse(uid: string, total: number, creditAmount: number
   for (const r of results) {
     warn("TB reverse transfer error:", r.index, r.result);
   }
+  logBalance("reverse", uid, total);
 }
 
 export async function tbRefund(uid: string, amount: number) {
@@ -483,6 +497,7 @@ export async function tbRefund(uid: string, amount: number) {
   for (const r of results) {
     warn("TB refund transfer error:", r.index, r.result);
   }
+  logBalance("refund", uid, amount);
 }
 
 export async function tbSetBalance(aid: string, target: number) {
