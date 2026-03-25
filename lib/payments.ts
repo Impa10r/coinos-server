@@ -1122,6 +1122,7 @@ export const sendLightning = async ({
     }
   } catch (e) {
     err("failed to pay", pr.substr(-8));
+    await db.sRem("pending", pr);
     try { await reverse(p); } catch (_) {}
     throw e;
   }
@@ -1827,7 +1828,7 @@ const finalize = async (r, p) => {
   const maxfee = p.fee;
   const { amount_msat, invoice_amount_msat } = await ln.decode(p.hash);
   l("finalize", p.id, "amount_sent_msat", r.amount_sent_msat, "invoice_msat", amount_msat || invoice_amount_msat);
-  p.fee = Math.round((r.amount_sent_msat - (amount_msat || invoice_amount_msat)) / 1000);
+  p.fee = Math.max(1, Math.ceil((r.amount_sent_msat - (amount_msat || invoice_amount_msat)) / 1000));
   p.ref = preimage;
 
   if (!(await g(`payment:${p.id}`)).ref) {
