@@ -50,6 +50,7 @@ export default {
     const username = c.req.param("username");
     const minSendable = c.req.query("minSendable") || 1000;
     const maxSendable = c.req.query("maxSendable") || 100000000000;
+    l("lnurlp", username);
     try {
       const user = await getUser(
         username.replace("lightning:", "").replace(/\s/g, "").replace("=", "").toLowerCase(),
@@ -88,6 +89,7 @@ export default {
     const amount = c.req.query("amount");
     const comment = c.req.query("comment");
     const nostr = c.req.query("nostr");
+    l("lnurl callback", id, "amount", amount, "comment", comment, "nostr", nostr ? nostr.slice(0, 40) : undefined);
     try {
       const iid = await g(`lnurl:${id}:invoice`);
       const uid = await g(`lnurl:${id}`);
@@ -122,12 +124,14 @@ export default {
         user,
       });
 
+      l("lnurl invoice", invoice.id, "hash", invoice.hash?.slice(0, 20));
       return c.json({
         pr: invoice.text,
         routes: [],
         verify: `${URL}/api/lnurl/verify/${invoice.id}`,
       });
     } catch (e) {
+      warn("lnurl callback error", id, e.message);
       return bail(c, e.message);
     }
   },
