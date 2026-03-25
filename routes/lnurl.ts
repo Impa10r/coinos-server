@@ -113,16 +113,14 @@ export default {
         }
       }
 
-      const invoice = iid
-        ? await gf(`invoice:${iid}`)
-        : await generate({
-            invoice: {
-              amount: Math.round(amount / 1000),
-              memo: metadata,
-              type: PaymentType.lightning,
-            },
-            user,
-          });
+      const invoice = await generate({
+        invoice: {
+          amount: Math.round(amount / 1000),
+          memo: metadata,
+          type: PaymentType.lightning,
+        },
+        user,
+      });
 
       return c.json({
         pr: invoice.text,

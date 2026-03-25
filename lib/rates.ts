@@ -62,7 +62,7 @@ export const getFx = async () => {
           `http://data.fixer.io/api/latest?access_key=${config.fixer}&base=USD`,
         ).json()) as any);
       } else {
-        ({ fx } = (await got("https://coinos.io/api/fx").json()) as any);
+        ({ fx } = (await g("fx")) || {});
       }
 
       const USD = fx.USD;
