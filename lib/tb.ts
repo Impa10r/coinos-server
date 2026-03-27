@@ -320,7 +320,7 @@ export async function tbDebit(
     } as any;
   }
 
-  logBalance("debit", aid, -(amount + tip + fee));
+  await logBalance("debit", aid, -(amount + tip + fee));
   return ourfee;
 }
 
@@ -378,7 +378,7 @@ export async function tbCredit(
   for (const r of results) {
     warn("TB credit transfer error:", r.index, r.result);
   }
-  logBalance("credit", aid, amount);
+  await logBalance("credit", aid, amount);
 }
 
 export async function tbConfirm(aid: string, amount: number) {
@@ -469,7 +469,7 @@ export async function tbReverse(uid: string, total: number, creditAmount: number
   for (const r of results) {
     warn("TB reverse transfer error:", r.index, r.result);
   }
-  logBalance("reverse", uid, total);
+  await logBalance("reverse", uid, total);
 }
 
 export async function tbRefund(uid: string, amount: number) {
@@ -497,7 +497,7 @@ export async function tbRefund(uid: string, amount: number) {
   for (const r of results) {
     warn("TB refund transfer error:", r.index, r.result);
   }
-  logBalance("refund", uid, amount);
+  await logBalance("refund", uid, amount);
 }
 
 export async function tbSetBalance(aid: string, target: number) {
