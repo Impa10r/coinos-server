@@ -240,20 +240,13 @@ const handle = (method, params, ev, app, user) =>
 
         await db.lPush(`${pubkey}:payments`, pid);
 
-        for (let i = 0; i < 10; i++) {
-          const { pays } = await ln.listpays(pr);
-          const p = pays.find((p) => p.status === "complete");
-          if (p) {
-            const { preimage } = p;
-            return result({ preimage });
-          }
-          await sleep(2000);
-        }
+        const p = await g(`payment:${pid}`);
+        if (p?.ref) return result({ preimage: p.ref });
       } catch (e) {
         return error({ code: "INTERNAL", message: e.message });
       }
 
-      return error({ code: "INTERNAL", message: "Payment timed out" });
+      return error({ code: "INTERNAL", message: "Preimage not available" });
     },
 
     async pay_keysend() {
