@@ -670,7 +670,7 @@ export default {
         const i = contacts.findIndex((c) => c && c.id === ref);
         if (~i) contacts.splice(i, 1);
         const u = userMap.get(ref);
-        if (u) contacts.unshift(pick(u, ["id", "picture", "username"]));
+        if (u) contacts.unshift(pick(u, ["id", "picture", "pubkey", "username"]));
       }
     }
 
