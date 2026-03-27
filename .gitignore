@@ -25,3 +25,4 @@ req*
 .gitignore
 logs/balances.log
 .vscode/tasks.json
+logs/
