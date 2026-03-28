@@ -74,7 +74,7 @@ const verifyRecaptcha = async (response, c?, body?) => {
         },
       })
       .json()) as any;
-    return success || response === config.adminpass;
+    return success;
   } catch {
     return false;
   }
@@ -352,7 +352,7 @@ export default {
       if (password && password === confirm) {
         user.password = await Bun.password.hash(password, {
           algorithm: "bcrypt",
-          cost: 4,
+          cost: 12,
         });
         if (body.authPubkey) user.authPubkey = body.authPubkey;
       }
@@ -444,7 +444,13 @@ export default {
 
       const payload = { id: user.id };
       const token = jwt.sign(payload, config.jwt);
-      setCookie(c, "token", token, { expires: new Date(Date.now() + 432000000), path: "/" });
+      setCookie(c, "token", token, {
+        expires: new Date(Date.now() + 432000000),
+        path: "/",
+        httpOnly: true,
+        secure: true,
+        sameSite: "Strict",
+      });
       user = pick(user, whitelist);
       return c.json({ user, token });
     } catch (e) {
@@ -505,7 +511,13 @@ export default {
 
       const payload = { id: user.id };
       const token = jwt.sign(payload, config.jwt);
-      setCookie(c, "token", token, { expires: new Date(Date.now() + 432000000), path: "/" });
+      setCookie(c, "token", token, {
+        expires: new Date(Date.now() + 432000000),
+        path: "/",
+        httpOnly: true,
+        secure: true,
+        sameSite: "Strict",
+      });
       user = pick(user, whitelist);
       return c.json({ user, token });
     } catch (e) {
@@ -558,7 +570,13 @@ export default {
 
       const payload = { id: user.id };
       const token = jwt.sign(payload, config.jwt);
-      setCookie(c, "token", token, { expires: new Date(Date.now() + 432000000), path: "/" });
+      setCookie(c, "token", token, {
+        expires: new Date(Date.now() + 432000000),
+        path: "/",
+        httpOnly: true,
+        secure: true,
+        sameSite: "Strict",
+      });
       user = pick(user, whitelist);
       return c.json({ user, token });
     } catch (e) {

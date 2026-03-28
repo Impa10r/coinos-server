@@ -82,9 +82,9 @@ services:
     image: lightninglabs/lnd:v0.18.5-beta
     container_name: lnd
     user: 1000:1000
-    command: ["lnd", "--lnddir=/data/.lnd"]
+    command: ["lnd"]
     volumes:
-      - ./data/lnd:/data/.lnd
+      - ./data/lnd:/.lnd
     ports:
       - '9735:9735'
       - '8080:8080'

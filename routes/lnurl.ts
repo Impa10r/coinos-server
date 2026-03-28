@@ -89,7 +89,16 @@ export default {
     const amount = c.req.query("amount");
     const comment = c.req.query("comment");
     const nostr = c.req.query("nostr");
-    l("lnurl callback", id, "amount", amount, "comment", comment, "nostr", nostr ? nostr.slice(0, 40) : undefined);
+    l(
+      "lnurl callback",
+      id,
+      "amount",
+      amount,
+      "comment",
+      comment,
+      "nostr",
+      nostr ? nostr.slice(0, 40) : undefined,
+    );
     try {
       const iid = await g(`lnurl:${id}:invoice`);
       const uid = await g(`lnurl:${id}`);
@@ -243,7 +252,7 @@ export default {
 
       if (invoice) {
         if (amount?.startsWith("+")) {
-          const tip = invoice.amount * amount.split("+")[1];
+          const tip = invoice.amount * Number(amount.split("+")[1]);
           invoice = await generate({
             invoice: {
               ...invoice,
