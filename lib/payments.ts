@@ -1118,7 +1118,7 @@ export const sendLightning = async ({
     });
 
     try {
-      if (!r.failed_parts) p = await finalize(r, p);
+      if (r.payment_preimage || r.preimage || !r.failed_parts) p = await finalize(r, p);
     } catch (e) {
       warn("failed to process payment", p.id);
     }
