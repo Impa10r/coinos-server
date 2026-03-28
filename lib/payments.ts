@@ -1911,9 +1911,13 @@ export const keepLndConnected = async () => {
   if (!lnd || !(config as any).lnd?.clnp2p) return;
   try {
     const { id } = await ln.getinfo();
-    await lnd.connectPeer(id, (config as any).lnd.clnp2p);
+    const connected = await lnd.isPeerConnected(id);
+    if (!connected) {
+      l("lnd: CLN peer disconnected, reconnecting...");
+      await lnd.connectPeer(id, (config as any).lnd.clnp2p);
+    }
   } catch (e: any) {
-    if (!e.message?.includes("already connected")) warn("lnd reconnect", e.message);
+    warn("lnd reconnect", e.message);
   }
   setTimeout(keepLndConnected, 60_000);
 };

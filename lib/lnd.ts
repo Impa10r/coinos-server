@@ -130,6 +130,11 @@ function makeLndClient() {
       return { routes: r.routes || [] };
     },
 
+    async isPeerConnected(pubkey: string): Promise<boolean> {
+      const { peers } = await request("GET", "/v1/peers");
+      return (peers || []).some((p: any) => p.pub_key === pubkey);
+    },
+
     async connectPeer(pubkey: string, host: string) {
       await request("POST", "/v1/peers", { addr: { pubkey, host }, perm: true });
     },
