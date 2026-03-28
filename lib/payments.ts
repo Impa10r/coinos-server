@@ -64,7 +64,9 @@ const outLn = {
   },
   async listpays(bolt11: string) {
     const result = await ln.listpays(bolt11);
-    const hasActiveOrComplete = result.pays.some((p) => p.status === "complete" || p.status === "pending");
+    const hasActiveOrComplete = result.pays.some(
+      (p) => p.status === "complete" || p.status === "pending",
+    );
     if (!hasActiveOrComplete && lnd) return await lnd.listpays(bolt11);
     return result;
   },
@@ -1760,8 +1762,18 @@ const finalize = async (r, p) => {
 
   const maxfee = p.fee;
   const { amount_msat, invoice_amount_msat } = await ln.decode(p.hash);
-  l("finalize", p.id, "amount_sent_msat", r.amount_sent_msat, "invoice_msat", amount_msat || invoice_amount_msat);
-  p.fee = Math.max(1, Math.ceil((r.amount_sent_msat - (amount_msat || invoice_amount_msat)) / 1000));
+  l(
+    "finalize",
+    p.id,
+    "amount_sent_msat",
+    r.amount_sent_msat,
+    "invoice_msat",
+    amount_msat || invoice_amount_msat,
+  );
+  p.fee = Math.max(
+    1,
+    Math.ceil((r.amount_sent_msat - (amount_msat || invoice_amount_msat)) / 1000),
+  );
   p.ref = preimage;
 
   if (!(await g(`payment:${p.id}`)).ref) {
