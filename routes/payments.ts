@@ -9,7 +9,6 @@ import { replay } from "$lib/lightning";
 import ln from "$lib/ln";
 import { err, l, warn } from "$lib/logging";
 import mqtt from "$lib/mqtt";
-import { createCpfpChild } from "$lib/cpfp";
 import {
   acquireArkLock,
   build,
@@ -32,6 +31,7 @@ import {
   getFundBalance,
   tbConfirm,
   tbCredit,
+  tbDebit,
   tbFundCredit,
   tbFundDebit,
 } from "$lib/tb";
@@ -767,20 +767,28 @@ export default {
       if (p.uid !== user.id) fail("unauthorized");
       if (p.confirmed) fail("transaction already confirmed");
       if (p.type !== PaymentType.bitcoin) fail("only bitcoin transactions can be bumped");
-      if (!p.bumpReserve || p.bumpReserve <= 0) fail("no bump reserve available");
 
-      const fees: any = await fetch(`${api[PaymentType.bitcoin]}/fees/recommended`).then((r) =>
-        r.json(),
-      );
-      const targetFeeRate = Math.max(Math.ceil(fees.fastestFee * 1.5), 4);
+      const fees: any = await fetch(api.fees).then((r) => r.json());
+      const targetFeeRate = Math.ceil(fees.fastestFee);
 
-      const { txid, childFee } = await createCpfpChild(p, targetFeeRate);
+      const bc = rpc(config.bitcoin);
+      const result = await bc.bumpfee(p.hash, { fee_rate: targetFeeRate });
+      if (result.errors?.length) fail(result.errors[0]);
 
-      return c.json({
-        txid,
-        childFee,
-        remaining: p.bumpReserve - childFee,
-      });
+      const newFee = sats(result.fee);
+      const oldFee = sats(result.origfee);
+      const feeDiff = newFee - oldFee;
+
+      const oldHash = p.hash;
+      p.hash = result.txid;
+      p.fee = newFee;
+      await s(`payment:${p.id}`, p);
+      await s(`payment:${result.txid}`, p.id);
+      await db.del(`payment:${oldHash}`);
+
+      if (feeDiff > 0) await tbDebit(p.uid, p.uid, "bitcoin", 0, 0, feeDiff, 0, 0, "Insufficient funds for bump fee");
+
+      return c.json({ txid: result.txid, fee: newFee });
     } catch (e) {
       err("failed to bump payment", id, e.message);
       return bail(c, e.message);
