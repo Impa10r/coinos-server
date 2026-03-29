@@ -33,7 +33,7 @@ const outLn = {
       if (lnd && !e.message?.includes("already underway")) {
         l("lnd: paying", args.invstring?.slice(-8), args.amount_msat, "maxfee", args.maxfee);
         try {
-          const r = await lnd.payinvoice(args);
+          const r = await lnd.payinvoice({ ...args, retry_for: 60 });
           l("lnd: paid", args.invstring?.slice(-8));
           return r;
         } catch (e2: any) {
@@ -1083,7 +1083,7 @@ export const sendLightning = async ({ user, pr, amount, fee = undefined, memo = 
       invstring: pr.replace(/\s/g, "").toLowerCase(),
       amount_msat: amount_msat ? undefined : amount * 1000,
       maxfee: fee * 1000,
-      retry_for: 20,
+      retry_for: 30,
     });
 
     try {
