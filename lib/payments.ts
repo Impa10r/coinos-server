@@ -1085,7 +1085,7 @@ export const sendLightning = async ({
   const minfee = isDirect ? 0 : Math.round(amount * 0.005);
 
   const parsedFee = Number.parseInt(fee);
-  fee = Number.isNaN(parsedFee) ? minfee : parsedFee;
+  fee = Math.max(Number.isNaN(parsedFee) ? minfee : parsedFee, minfee);
 
   if (fee < 0) fail("Fee cannot be negative");
 
