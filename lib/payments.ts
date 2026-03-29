@@ -1054,7 +1054,7 @@ export const sendLightning = async ({ user, pr, amount, fee = undefined, memo = 
 
   const { channels } = await outLn.listpeerchannels();
   const isDirect = channels.some((c) => c.peer_id === payee);
-  const minfee = isDirect ? 0 : Math.round(amount * 0.005);
+  const minfee = isDirect ? 0 : Math.max(10, Math.round(amount * 0.005));
 
   const parsedFee = Number.parseInt(fee);
   fee = Math.max(Number.isNaN(parsedFee) ? minfee : parsedFee, minfee);
