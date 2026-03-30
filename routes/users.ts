@@ -445,7 +445,7 @@ export default {
       const payload = { id: user.id };
       const token = jwt.sign(payload, config.jwt);
       setCookie(c, "token", token, {
-        expires: new Date(Date.now() + 432000000),
+        expires: new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000),
         path: "/",
         httpOnly: true,
         secure: true,
@@ -512,7 +512,7 @@ export default {
       const payload = { id: user.id };
       const token = jwt.sign(payload, config.jwt);
       setCookie(c, "token", token, {
-        expires: new Date(Date.now() + 432000000),
+        expires: new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000),
         path: "/",
         httpOnly: true,
         secure: true,
@@ -571,7 +571,7 @@ export default {
       const payload = { id: user.id };
       const token = jwt.sign(payload, config.jwt);
       setCookie(c, "token", token, {
-        expires: new Date(Date.now() + 432000000),
+        expires: new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000),
         path: "/",
         httpOnly: true,
         secure: true,

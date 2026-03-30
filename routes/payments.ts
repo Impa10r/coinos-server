@@ -769,7 +769,7 @@ export default {
       if (p.type !== PaymentType.bitcoin) fail("only bitcoin transactions can be bumped");
 
       const fees: any = await fetch(api.fees).then((r) => r.json());
-      const targetFeeRate = Math.ceil(fees.fastestFee);
+      const targetFeeRate = Math.max(Math.ceil(fees.fastestFee), p.feeRate || 0) + 1;
 
       const bc = rpc(config.bitcoin);
       const result = await bc.bumpfee(p.hash, { fee_rate: targetFeeRate });
@@ -782,6 +782,7 @@ export default {
       const oldHash = p.hash;
       p.hash = result.txid;
       p.fee = newFee;
+      p.feeRate = targetFeeRate;
       await s(`payment:${p.id}`, p);
       await s(`payment:${result.txid}`, p.id);
       await db.del(`payment:${oldHash}`);

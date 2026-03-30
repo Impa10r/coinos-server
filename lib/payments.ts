@@ -856,6 +856,7 @@ export const sendOnchain = async (params) => {
 
       for (let i = 0; i < tx.vout.length; i++) {
         const { scriptPubKey, value } = tx.vout[i];
+        if (!scriptPubKey.address) continue;
 
         total += sats(value);
         const invoice = await getInvoice(scriptPubKey.address);
