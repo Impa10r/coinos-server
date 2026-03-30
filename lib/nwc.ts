@@ -66,12 +66,32 @@ const budgetedMethods = new Set(["pay_invoice", "pay", "pay_keysend"]);
 
 export default () => {
   let r: any;
+  let heartbeatInterval: any;
 
   function connect() {
+    if (heartbeatInterval) clearInterval(heartbeatInterval);
     r = new Relay(config.nostr, { reconnect: false });
 
     r.on("open", async (_) => {
       l("nwc connected to strfry");
+
+      // Periodically check if connection is alive
+      heartbeatInterval = setInterval(() => {
+        try {
+          if (!r?.ws || r.ws.readyState !== 1) {
+            warn("nwc heartbeat: connection dead, reconnecting");
+            clearInterval(heartbeatInterval);
+            try {
+              r.close();
+            } catch (_) {}
+            setTimeout(connect, 1000);
+          }
+        } catch (_) {
+          warn("nwc heartbeat: error, reconnecting");
+          clearInterval(heartbeatInterval);
+          setTimeout(connect, 1000);
+        }
+      }, 30000);
       r.subscribe("nwc", {
         kinds: [23194],
         "#p": [serverPubkey, serverPubkey2],
@@ -108,6 +128,7 @@ export default () => {
 
     r.on("close", () => {
       warn("nwc strfry connection lost, reconnecting in 5s");
+      if (heartbeatInterval) clearInterval(heartbeatInterval);
       setTimeout(connect, 5000);
     });
 
