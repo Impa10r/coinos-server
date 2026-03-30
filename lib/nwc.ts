@@ -126,7 +126,7 @@ export default () => {
 
           response = await finalizeEvent(response, hexToBytes(sk));
           r.send(["EVENT", response]);
-        } catch (e) {
+        } catch {
           // err(
           //   "problem with nwc",
           //   pubkey,
@@ -135,7 +135,7 @@ export default () => {
           //   e.message,
           // );
         }
-      } catch (e) {
+      } catch {
         // err("problem with nwc", e.message);
       }
     });
@@ -283,7 +283,7 @@ const handle = (method, params, ev, app, user) =>
         }
 
         return error({ code: "INTERNAL", message: "Payment timed out" });
-      } catch (e) {
+      } catch {
         return error({ code: "INTERNAL", message: "Keysend payment failed" });
       }
     },
@@ -424,7 +424,7 @@ const handle = (method, params, ev, app, user) =>
               const { pays } = await ln.listpays({ bolt11: p.hash });
               payment_hash ||= pays[0].payment_hash;
             }
-          } catch (e) {}
+          } catch {}
         }
 
         transactions.push({

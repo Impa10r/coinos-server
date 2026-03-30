@@ -680,11 +680,11 @@ export const decode = async (hex) => {
   try {
     tx = await bc.decodeRawTransaction(hex);
     type = PaymentType.bitcoin;
-  } catch (e) {
+  } catch {
     try {
       tx = await lq.decodeRawTransaction(hex);
       type = PaymentType.liquid;
-    } catch (e) {
+    } catch {
       err("invalid hex", hex);
       fail("unrecognized tx");
     }
@@ -1001,7 +1001,7 @@ export const sendLightning = async ({ user, pr, amount, fee = undefined, memo = 
 
     try {
       if (r.payment_preimage || r.preimage || !r.failed_parts) p = await finalize(r, p);
-    } catch (e) {
+    } catch {
       warn("failed to process payment", p.id);
     }
   } catch (e) {
@@ -1047,10 +1047,11 @@ const getAddressType = async (a) => {
     await bc.getAddressInfo(a);
     return PaymentType.bitcoin;
   } catch (e) {
+    err("getAddressInfo failed", `code: ${e.code} message: ${e.message}`);
     try {
       await lq.getAddressInfo(a);
       return PaymentType.liquid;
-    } catch (e) {
+    } catch {
       fail("unrecognized address");
     }
   }
@@ -1063,13 +1064,10 @@ const buildNonCustodial = async ({ aid, amount, address, feeRate, subtract, user
   amount = Number.parseInt(amount);
   if (amount < 0) fail("invalid amount");
 
-  const fees: any = await fetch(api.fees).then((r) =>
-    r.json(),
-  );
+  const fees: any = await fetch(api.fees).then((r) => r.json());
 
   fees.fastestFee = Math.ceil(fees.fastestFee);
-  for (const k of ["halfHourFee", "hourFee", "economyFee"])
-    fees[k] = Math.ceil(fees[k] * 10) / 10;
+  for (const k of ["halfHourFee", "hourFee", "economyFee"]) fees[k] = Math.ceil(fees[k] * 10) / 10;
 
   if (!feeRate) feeRate = fees.halfHourFee;
 
@@ -1193,7 +1191,7 @@ export const build = async ({ aid, amount, address, feeRate, subtract, user }) =
 
   const fees: any =
     type === PaymentType.liquid
-      ? { fastestFee: 0.1, halfHourFee: 0.1, hourFee: 0.1 }
+      ? { fastestFee: 0.1, halfHourFee: 0.1, hourFee: 0.1, economyFee: 0.1 }
       : await fetch(api.fees).then((r) => r.json());
 
   if (isBitcoin) {
@@ -1208,11 +1206,7 @@ export const build = async ({ aid, amount, address, feeRate, subtract, user }) =
     feeRate = fees.halfHourFee;
   }
 
-  if (isBitcoin) {
-    if (feeRate < 0.1) fail("fee rate too low");
-  } else {
-    if (feeRate < fees.hourFee) fail("fee rate too low");
-  }
+  if (feeRate < fees.economyFee) fail("fee rate too low");
 
   let outs: any[] = [{ [address]: btc(amount) }];
 
@@ -1273,7 +1267,7 @@ export const build = async ({ aid, amount, address, feeRate, subtract, user }) =
     const tx = await node.decodeRawTransaction(rawTx);
     const prevOutput = tx.vout[vout];
     const { address } = prevOutput.scriptPubKey;
-    const { hdkeypath: path } = await node.getAddressInfo(address);
+    const path = address ? (await node.getAddressInfo(address)).hdkeypath : null;
     const witnessUtxo = {
       amount: Math.round(prevOutput.value * SATS),
       script: prevOutput.scriptPubKey.hex,
@@ -1307,7 +1301,7 @@ export const checkOutgoingConfirmations = async () => {
         await s(`payment:${p.id}`, p);
         await db.sRem("outgoing:unconfirmed", pid);
         emit(p.uid, "payment", p);
-        l("outgoing confirmed", p.id, "refunded", refundAmount);
+        l("outgoing confirmed", p.id);
       } catch (e) {
         err("problem checking outgoing confirmation", pid, e.message);
       }

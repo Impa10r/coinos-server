@@ -69,9 +69,7 @@ async function checkLightningHealth(): Promise<boolean> {
         RPC_TIMEOUT,
         "delinvoice",
       );
-    } catch (e) {
-      // Ignore cleanup errors
-    }
+    } catch {}
 
     const duration = Date.now() - startTime;
     l(`health check: passed in ${duration}ms, node: ${info.id.slice(0, 16)}...`);
