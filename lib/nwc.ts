@@ -107,6 +107,7 @@ export default () => {
       const size = await db.zCard(handledKey);
       if (size > handledMaxSize) {
         await db.zRemRangeByRank(handledKey, 0, size - handledMaxSize - 1);
+
       }
       let { content, pubkey } = ev;
       const pk = ev.tags.find((t) => t[0] === "p")[1];
@@ -299,7 +300,7 @@ const handle = (method, params, ev, app, user) =>
         }
 
         return error({ code: "INTERNAL", message: "Payment timed out" });
-      } catch (e) {
+      } catch {
         return error({ code: "INTERNAL", message: "Keysend payment failed" });
       }
     },
@@ -445,7 +446,7 @@ const handle = (method, params, ev, app, user) =>
               const { pays } = await ln.listpays({ bolt11: p.hash });
               payment_hash ||= pays[0].payment_hash;
             }
-          } catch (e) {}
+          } catch {}
         }
 
         transactions.push({

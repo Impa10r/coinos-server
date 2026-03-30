@@ -146,13 +146,13 @@ export default {
       if (key.startsWith("npub")) {
         try {
           key = nip19.decode(key).data;
-        } catch (e) {}
+        } catch {}
       }
 
       if (key.startsWith("nprofile")) {
         try {
           ({ pubkey: key } = nip19.decode(key).data as unknown as ProfilePointer);
-        } catch (e) {}
+        } catch {}
       }
 
       const user = await getNostrUser(key);
@@ -413,7 +413,7 @@ export default {
         let verified = false;
         try {
           if (user?.password) verified = await Bun.password.verify(password, user.password);
-        } catch (e) {}
+        } catch {}
 
         if (!user || !verified) {
           await db.incrBy(ipFailKey, 1);
@@ -445,7 +445,7 @@ export default {
       const payload = { id: user.id };
       const token = jwt.sign(payload, config.jwt);
       setCookie(c, "token", token, {
-        expires: new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000),
+        expires: new Date(Date.now() + 1 * 365 * 24 * 60 * 60 * 1000),
         path: "/",
         httpOnly: true,
         secure: true,
@@ -512,7 +512,7 @@ export default {
       const payload = { id: user.id };
       const token = jwt.sign(payload, config.jwt);
       setCookie(c, "token", token, {
-        expires: new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000),
+        expires: new Date(Date.now() + 1 * 365 * 24 * 60 * 60 * 1000),
         path: "/",
         httpOnly: true,
         secure: true,
@@ -571,7 +571,7 @@ export default {
       const payload = { id: user.id };
       const token = jwt.sign(payload, config.jwt);
       setCookie(c, "token", token, {
-        expires: new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000),
+        expires: new Date(Date.now() + 1 * 365 * 24 * 60 * 60 * 1000),
         path: "/",
         httpOnly: true,
         secure: true,
@@ -1116,7 +1116,7 @@ export default {
         try {
           const node = rpc({ ...config[account.type], wallet: id });
           await node.unloadWallet(id);
-        } catch (e) {
+        } catch {
           warn("failed to unload wallet", id);
         }
       }

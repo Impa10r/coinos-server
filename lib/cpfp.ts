@@ -98,7 +98,7 @@ export async function createCpfpChild(payment: any, targetFeeRate: number) {
         fail("package submission failed");
       }
     }
-  } catch (e) {
+  } catch {
     try {
       const parentHex = await bc.getRawTransaction(parentTxid);
       const pkg = await bc.submitPackage([parentHex, hex]);

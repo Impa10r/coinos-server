@@ -14,7 +14,7 @@ export default {
   },
 
   async index(c) {
-    const { date, fx, ...rates } = await g("rates");
+    const { date: _date, fx: _fx, ...rates } = await g("rates");
     c.header("Cache-Control", "public, max-age=30");
     return c.json(rates);
   },

@@ -58,7 +58,6 @@ export default {
     try {
       const amount = await claim(token);
 
-      let memo;
       const hash = v4();
       const { currency, id: uid } = user;
       const rates = await g("rates");
@@ -71,7 +70,7 @@ export default {
         received: 0,
       });
 
-      await credit({ hash, amount, memo, ref: user.id, type });
+      await credit({ hash, amount, ref: user.id, type });
 
       return c.json({ ok: true });
     } catch (e) {

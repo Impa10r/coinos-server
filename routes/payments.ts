@@ -561,7 +561,7 @@ export default {
       managers = await Promise.all(ids.map(async (id) => await getUser(id, fields)));
 
       return c.json(managers);
-    } catch (e) {}
+    } catch {}
   },
 
   async confirm(c) {
@@ -787,7 +787,18 @@ export default {
       await s(`payment:${result.txid}`, p.id);
       await db.del(`payment:${oldHash}`);
 
-      if (feeDiff > 0) await tbDebit(p.uid, p.uid, "bitcoin", 0, 0, feeDiff, 0, 0, "Insufficient funds for bump fee");
+      if (feeDiff > 0)
+        await tbDebit(
+          p.uid,
+          p.uid,
+          "bitcoin",
+          0,
+          0,
+          feeDiff,
+          0,
+          0,
+          "Insufficient funds for bump fee",
+        );
 
       return c.json({ txid: result.txid, fee: newFee });
     } catch (e) {

@@ -48,7 +48,7 @@ export default async (user, ip) => {
       ).json();
 
       user.currency = countries[code];
-    } catch (e) {
+    } catch {
       warn("unable to detect country from IP", username);
     }
   }

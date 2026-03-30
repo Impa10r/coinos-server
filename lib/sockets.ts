@@ -88,7 +88,7 @@ export const websocket = {
 
     try {
       ({ type, data } = JSON.parse(message));
-    } catch (e) {
+    } catch {
       err("coudn't parse socket message");
     }
 
@@ -98,7 +98,7 @@ export const websocket = {
         try {
           if (data) await track(ws, data);
           ws.send(JSON.stringify({ type: "id", data: ws.id }));
-        } catch (e) {
+        } catch {
           // err("Failed to send heartbeat", e.message);
         }
         break;

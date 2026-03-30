@@ -51,7 +51,7 @@ export default {
         try {
           const { amount_msat } = await ln.decode(bolt11);
           if (amount_msat) amount = Math.round(amount_msat / 1000);
-        } catch (e) {}
+        } catch {}
 
         zaps.push({ amount, pubkey });
       }
@@ -176,14 +176,14 @@ export default {
         try {
           const { amount_msat } = await ln.decode(bolt11);
           if (amount_msat) amount = Math.round(amount_msat / 1000);
-        } catch (e) {}
+        } catch {}
 
         let user;
         if (pubkey) {
           try {
             user = await getNostrUser(pubkey);
             zaps.push({ amount, user });
-          } catch (e) {}
+          } catch {}
         }
       }
 

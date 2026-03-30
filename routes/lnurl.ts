@@ -1,4 +1,4 @@
-import { db, g, gf, s } from "$lib/db";
+import { db, g, s } from "$lib/db";
 import { generate } from "$lib/invoices";
 import ln from "$lib/ln";
 import { err, l, warn } from "$lib/logging";
@@ -24,7 +24,7 @@ export default {
     try {
       const r = (await got(url).json()) as any;
       if (r.tag !== "payRequest") fail("not an ln address");
-    } catch (e) {
+    } catch {
       const m = `failed to lookup lightning address ${address}`;
       warn(m);
       return bail(c, m);
@@ -100,7 +100,6 @@ export default {
       nostr ? nostr.slice(0, 40) : undefined,
     );
     try {
-      const iid = await g(`lnurl:${id}:invoice`);
       const uid = await g(`lnurl:${id}`);
       const user = await getUser(uid);
 

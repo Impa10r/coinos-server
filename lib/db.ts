@@ -53,7 +53,7 @@ export const g = async (k) => {
   const v = await db.get(k);
   try {
     return JSON.parse(v as string);
-  } catch (e) {
+  } catch {
     return v;
   }
 };
@@ -73,7 +73,7 @@ export const ga = async (k) => {
   const v = await archive.get(k);
   try {
     return JSON.parse(v as string);
-  } catch (e) {
+  } catch {
     return v;
   }
 };
@@ -92,7 +92,7 @@ export const gf = async (k) => {
   if (v === null) v = await archive.get(k);
   try {
     return JSON.parse(v as string);
-  } catch (e) {
+  } catch {
     return v;
   }
 };
@@ -142,7 +142,7 @@ export const getWithArchive = async (prefix, id) => {
       return JSON.parse(ref as string);
     }
     return parsed;
-  } catch (e) {
+  } catch {
     return v;
   }
 };

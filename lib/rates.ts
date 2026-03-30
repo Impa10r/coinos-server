@@ -29,7 +29,7 @@ const connect = async () => {
         rates.IRT = (
           (await got("https://api.nobitex.ir/v2/orderbook/BTCIRT").json()) as any
         ).lastTradePrice;
-      } catch (e) {}
+      } catch {}
 
       rate = msg.c;
       s("rate", rate);
