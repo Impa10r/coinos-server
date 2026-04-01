@@ -14,6 +14,7 @@
     // Best practices
     "strict": false,
     "skipLibCheck": true,
+    "esModuleInterop": true,
     "noFallthroughCasesInSwitch": true,
 
     // Some stricter flags

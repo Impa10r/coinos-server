@@ -20,7 +20,11 @@ export default async (c) => {
     if (format !== "image" && !["jpg", "jpeg", "png"].includes(ext)) fail("unsupported file type");
 
     const w = type === "banner" ? 1920 : 240;
-    buf = await sharp(buf, { failOnError: false }).rotate().resize(w).webp().toBuffer();
+    buf = (await sharp(buf, { failOnError: false })
+      .rotate()
+      .resize(w)
+      .webp()
+      .toBuffer()) as Buffer<ArrayBuffer>;
 
     const hash = createHash("sha256")
       .update(buf as any)

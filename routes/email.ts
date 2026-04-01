@@ -53,6 +53,6 @@ export default {
       } else {
         return bail(c, "failed captcha");
       }
-    } catch (e) {}
+    } catch {}
   },
 };

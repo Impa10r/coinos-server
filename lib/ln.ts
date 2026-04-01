@@ -65,9 +65,7 @@ function lightningProxy(rpcPath: string): any {
     if (!existsSync(rpcPath)) {
       nextTryAt = Date.now() + backoff;
       backoff = Math.min(maxBackoff, Math.floor(backoff * 1.8));
-      throw new LightningUnavailableError(
-        `Lightning RPC socket not found at ${rpcPath}`
-      );
+      throw new LightningUnavailableError(`Lightning RPC socket not found at ${rpcPath}`);
     }
 
     try {

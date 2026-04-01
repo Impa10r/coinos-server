@@ -305,6 +305,6 @@ Bun.serve({
 
 l(`coinos server listening on ${host_}:${port}`);
 
-const logerr = (e: Error) => {};
+const logerr = (_e: Error) => {};
 process.on("unhandledRejection", logerr);
 process.on("uncaughtException", logerr);

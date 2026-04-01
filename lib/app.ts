@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
-import pino from "pino";
+import { pino } from "pino";
 
 const app = new Hono();
 

@@ -1,4 +1,4 @@
-import pino from "pino";
+import { pino } from "pino";
 
 export const l = (...msgs) => pino().info(msgs.join(" "));
 export const warn = (...msgs) => pino().warn(msgs.join(" "));

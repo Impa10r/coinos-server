@@ -182,7 +182,7 @@ export const parseContent = ({ content, tags = [], html = false }: ContentArgs):
         }
 
         return [`nostr:${type}`, bech32, { ...value, entity }];
-      } catch (e) {
+      } catch {
         // pass
       }
     }

@@ -1,3 +1,4 @@
+import config from "$config";
 import { db, g } from "$lib/db";
 import ln from "$lib/ln";
 import { getMlsUsers } from "$lib/mls";
@@ -360,7 +361,7 @@ export default {
         profile: pubkey,
         event: id,
         amount: amount * 1000,
-        relays: ["wss://relay.coinos.io", "wss://relay.primal.net"],
+        relays: config.relays,
         comment: "",
       });
 

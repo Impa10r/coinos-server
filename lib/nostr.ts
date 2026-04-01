@@ -162,7 +162,7 @@ export const getCount = async (pubkey) => {
     }
 
     return { follows, followers };
-  } catch (e) {}
+  } catch {}
 };
 
 export const getNostrUser = async (key) => {
@@ -221,7 +221,7 @@ export const q = async (f) => {
                 r.subscribe([f], {
                   onevent(e) {
                     found.push(e);
-                    coinos.publish(e).catch(() => {});
+                    publish(e).catch(() => {});
                   },
                   oneose() {
                     r.close();
@@ -234,7 +234,6 @@ export const q = async (f) => {
       ),
     )
   ).flat();
-
 
   if (events.length) db.set(`${k}:since`, events[events.length - 1].created_at);
   return events;

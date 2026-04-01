@@ -25,6 +25,7 @@ export const notify = async (p, user, withdrawal) => {
     if (user.verified && user.notify) {
       mail(user, paymentReceived, templates.paymentReceived, {
         ...t(user),
+        domain: config.domain,
         username,
         payment: {
           amount: fmt(p.amount),

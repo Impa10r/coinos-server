@@ -10,9 +10,9 @@ export default {
   },
   archive: "redis://arc:6380",
   db: "redis://db",
-  nostr: "wss://relay.coinos.pro",
+  nostr: "wss://relay.coinos.io",
   relays: [
-    "wss://relay.coinos.pro",
+    "wss://relay.coinos.io",
     "wss://relay.primal.net",
     "wss://relay.damus.io",
     "wss://nostr-pub.wellorder.net",
@@ -21,7 +21,7 @@ export default {
     "wss://relay.nostr.bg",
     "wss://nostr.orangepill.dev"
   ],
-  publicRelay: "wss://relay.coinos.pro",
+  publicRelay: "wss://relay.coinos.io",
   jwt: "00d0ab4f7738a83feb37f661526512063c41e49278b7c32cba87314269a5788b",
   bitcoin: {
     host: "bc",
@@ -61,6 +61,8 @@ export default {
   },
   adminpass: "pwa",
   txWebhookSecret: process.env.TX_WEBHOOK_SECRET || "pwa",
+  domain: "coinos.io",
+  mqttUrl: "mqtt://mqtt.coinos.io",
   support: "support@coinos.io",
   nostrKey: "nsec1msk3dqy2pzqy2murmm5s5gejfgkjkm2zesnh266gud2wcvhcunzqlu0h90",
   nostrKey2: "nsec17ugnsk0qrnakf7xaxzckya4xvx58q063k6q4vq2l577k4uyv9r0qmdcgm5",

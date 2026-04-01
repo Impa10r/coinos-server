@@ -204,15 +204,9 @@ export const debit = async ({
 }) => {
   amount = Number.parseInt(amount);
 
-  const whitelisted = await db.sIsMember(
-    "whitelist",
-    user?.username?.toLowerCase().trim(),
-  );
+  const whitelisted = await db.sIsMember("whitelist", user?.username?.toLowerCase().trim());
 
-  const blacklisted = await db.sIsMember(
-    "blacklist",
-    user?.username?.toLowerCase().trim(),
-  );
+  const blacklisted = await db.sIsMember("blacklist", user?.username?.toLowerCase().trim());
 
   const serverLimit = await g(`${type}:limit`);
   const userLimit = await g("limit");
@@ -224,7 +218,6 @@ export const debit = async ({
     (userLimit != null && amount > userLimit && !whitelisted) ||
     (!skipServerLimit && serverLimit != null && amount > serverLimit)
   ) {
-
     warn("Blocking", user.username, amount, hash, user.id, type, frozen, userLimit, serverLimit);
 
     fail("Problem sending payment");
@@ -249,8 +242,7 @@ export const debit = async ({
 
     ref = invoice.uid;
 
-    const equivalentRate =
-      invoice.rate * (rates[currency] / rates[invoice.currency]);
+    const equivalentRate = invoice.rate * (rates[currency] / rates[invoice.currency]);
 
     if (Math.abs(invoice.rate / rates[invoice.currency] - 1) < 0.01) {
       rate = equivalentRate;
@@ -266,17 +258,12 @@ export const debit = async ({
 
   let creditType = type;
   if (creditType === PaymentType.bolt12) creditType = PaymentType.lightning;
-  let ourfee: any = [
-    PaymentType.bitcoin,
-    PaymentType.liquid,
-    PaymentType.lightning,
-  ].includes(type)
+  let ourfee: any = [PaymentType.bitcoin, PaymentType.liquid, PaymentType.lightning].includes(type)
     ? Math.round((amount + fee + tip) * config.fee[creditType])
     : 0;
 
   if (aid !== uid) ourfee = 0;
-  const frozenBalance =
-    !blacklisted || whitelisted ? 0 : await getBalance(uid);
+  const frozenBalance = !blacklisted || whitelisted ? 0 : await getBalance(uid);
 
   ourfee = await tbDebit(
     aid,
@@ -399,8 +386,7 @@ export const credit = async ({
     items: undefined,
   };
 
-  if ([PaymentType.bitcoin, PaymentType.liquid].includes(type))
-    inv.pending += amount;
+  if ([PaymentType.bitcoin, PaymentType.liquid].includes(type)) inv.pending += amount;
   else {
     inv.received += amount;
     inv.preimage = ref;
@@ -585,9 +571,7 @@ const pay = async ({ aid = undefined, amount, to, user }) => {
       if (to.includes("@")) lnurl = `https://${domain}/.well-known/lnurlp/${name}`;
     }
   } else if (to.startsWith("lnurl")) {
-    lnurl = Buffer.from(
-      bech32.fromWords(bech32.decode(to, 20000).words),
-    ).toString();
+    lnurl = Buffer.from(bech32.fromWords(bech32.decode(to, 20000).words)).toString();
   }
 
   const recipient = await getUser(to);
@@ -651,8 +635,7 @@ const pay = async ({ aid = undefined, amount, to, user }) => {
     const localInv = await getInvoice(to).catch(() => null);
     if (localInv) {
       const recipient = await getUser(localInv.uid);
-      if (recipient)
-        return sendInternal({ amount, invoice: localInv, recipient, sender: user });
+      if (recipient) return sendInternal({ amount, invoice: localInv, recipient, sender: user });
     }
   }
 
@@ -667,9 +650,12 @@ const pay = async ({ aid = undefined, amount, to, user }) => {
     const { id: source } = await ln.getinfo();
     const { offer_issuer_id } = await ln.decode(to);
     const { routes } = await ln.getroutes(
-      source, offer_issuer_id, amount * 1000,
+      source,
+      offer_issuer_id,
+      amount * 1000,
       ["auto.localchans", "auto.sourcefree"],
-      Math.round(amount * 0.02) * 1000, 6,
+      Math.round(amount * 0.02) * 1000,
+      6,
     );
     fee = routes.length
       ? Math.max(5, Math.round((routes[0].path[0].amount_msat - routes[0].amount_msat) / 1000))
@@ -726,12 +712,8 @@ const sendNonCustodial = async (params) => {
     // Build set of own addresses for change detection
     const ownAddresses = new Set<string>();
     for (let i = 0; i <= nextIndex; i++) {
-      ownAddresses.add(
-        deriveAddress(account.pubkey, account.fingerprint, i, false).address,
-      );
-      ownAddresses.add(
-        deriveAddress(account.pubkey, account.fingerprint, i, true).address,
-      );
+      ownAddresses.add(deriveAddress(account.pubkey, account.fingerprint, i, false).address);
+      ownAddresses.add(deriveAddress(account.pubkey, account.fingerprint, i, true).address);
     }
 
     let totalIn = 0;
@@ -808,8 +790,7 @@ export const sendOnchain = async (params) => {
     inflight[txid] = true;
 
     if (!signed) {
-      if (config[type].walletpass)
-        await node.walletPassphrase(config[type].walletpass, 300);
+      if (config[type].walletpass) await node.walletPassphrase(config[type].walletpass, 300);
 
       ({ hex } = await node.signRawTransactionWithWallet(
         type === PaymentType.liquid ? await node.blindRawTransaction(hex) : hex,
@@ -962,18 +943,14 @@ export const sendKeysend = async ({
       extratlvs,
     });
   } catch (e) {
-    try { await reverse(p); } catch (_) {}
+    try {
+      await reverse(p);
+    } catch {}
     throw e;
   }
 };
 
-export const sendLightning = async ({
-  user,
-  pr,
-  amount,
-  fee = undefined,
-  memo = undefined,
-}) => {
+export const sendLightning = async ({ user, pr, amount, fee = undefined, memo = undefined }) => {
   let p;
 
   if (typeof amount !== "undefined") {
@@ -984,15 +961,12 @@ export const sendLightning = async ({
     }
   }
 
-  let { type, invoice_amount_msat, amount_msat, invoice_node_id, payee } =
-    await ln.decode(pr);
+  let { type, invoice_amount_msat, amount_msat, invoice_node_id, payee } = await ln.decode(pr);
   if (type.includes("bolt12")) {
     amount_msat = invoice_amount_msat;
     payee = invoice_node_id;
   }
 
-  const amt = amount_msat ? Math.round(amount_msat / 1000) : amount;
-  let minfee = Math.max(5, Math.round(amt * 0.005));
   const { channels } = await outLn.listpeerchannels();
   const isDirect = channels.some((c) => c.peer_id === payee);
   const minfee = isDirect ? 0 : Math.max(10, Math.round(amount * 0.005));
@@ -1005,8 +979,7 @@ export const sendLightning = async ({
   const { pays } = await outLn.listpays(pr);
   if (pays.find((p) => p.status === "complete")) fail("Invoice has already been paid");
 
-  if (pays.find((p) => p.status === "pending"))
-    fail("Payment is already underway");
+  if (pays.find((p) => p.status === "pending")) fail("Payment is already underway");
 
   p = await debit({
     hash: pr,
@@ -1038,7 +1011,9 @@ export const sendLightning = async ({
   } catch (e) {
     err("failed to pay", pr.substr(-8));
     await db.sRem("pending", pr);
-    try { await reverse(p); } catch (_) {}
+    try {
+      await reverse(p);
+    } catch {}
     throw e;
   }
 
@@ -1088,7 +1063,7 @@ const getAddressType = async (a) => {
   }
 };
 
-const buildNonCustodial = async ({ aid, amount, address, feeRate, subtract, user }) => {
+const buildNonCustodial = async ({ aid, amount, address, feeRate, subtract }) => {
   const account = await g(`account:${aid}`);
   if (!account?.pubkey) fail("account missing pubkey");
 
@@ -1096,7 +1071,6 @@ const buildNonCustodial = async ({ aid, amount, address, feeRate, subtract, user
   if (amount < 0) fail("invalid amount");
 
   const fees: any = await fetch(api.fees).then((r) => r.json());
-
 
   fees.fastestFee = Math.ceil(fees.fastestFee);
   for (const k of ["halfHourFee", "hourFee", "economyFee"]) fees[k] = Math.ceil(fees[k] * 10) / 10;
@@ -1106,18 +1080,8 @@ const buildNonCustodial = async ({ aid, amount, address, feeRate, subtract, user
   const nextIndex = account.nextIndex || 0;
 
   // Derive all used external + internal addresses and fetch UTXOs
-  const externalAddrs = deriveAddresses(
-    account.pubkey,
-    account.fingerprint,
-    nextIndex + 1,
-    false,
-  );
-  const internalAddrs = deriveAddresses(
-    account.pubkey,
-    account.fingerprint,
-    nextIndex + 1,
-    true,
-  );
+  const externalAddrs = deriveAddresses(account.pubkey, account.fingerprint, nextIndex + 1, false);
+  const internalAddrs = deriveAddresses(account.pubkey, account.fingerprint, nextIndex + 1, true);
   const allAddrs = [...externalAddrs, ...internalAddrs];
 
   const rawUtxos = await getAddressUtxos(allAddrs);
@@ -1126,26 +1090,14 @@ const buildNonCustodial = async ({ aid, amount, address, feeRate, subtract, user
   // Build address-to-path lookup
   const addrToPath = {};
   for (let i = 0; i <= nextIndex; i++) {
-    const { address: extAddr } = deriveAddress(
-      account.pubkey,
-      account.fingerprint,
-      i,
-      false,
-    );
+    const { address: extAddr } = deriveAddress(account.pubkey, account.fingerprint, i, false);
     addrToPath[extAddr] = `m/0/${i}`;
-    const { address: intAddr } = deriveAddress(
-      account.pubkey,
-      account.fingerprint,
-      i,
-      true,
-    );
+    const { address: intAddr } = deriveAddress(account.pubkey, account.fingerprint, i, true);
     addrToPath[intAddr] = `m/1/${i}`;
   }
 
   // Convert esplora UTXOs to selectUTXO input format
-  const keyVersions = account.pubkey.startsWith("tpub")
-    ? hdVersions
-    : undefined;
+  const keyVersions = account.pubkey.startsWith("tpub") ? hdVersions : undefined;
   const accountKey = HDKey.fromExtendedKey(account.pubkey, keyVersions);
 
   const utxoInputs = rawUtxos.map((u) => {
@@ -1209,12 +1161,8 @@ const buildNonCustodial = async ({ aid, amount, address, feeRate, subtract, user
   // Build input metadata for client signing
   const inputs = selected.inputs.map((input) => {
     const inputTxid =
-      typeof input.txid === "string"
-        ? input.txid
-        : Buffer.from(input.txid).toString("hex");
-    const utxo = rawUtxos.find(
-      (u) => u.txid === inputTxid && u.vout === input.index,
-    );
+      typeof input.txid === "string" ? input.txid : Buffer.from(input.txid).toString("hex");
+    const utxo = rawUtxos.find((u) => u.txid === inputTxid && u.vout === input.index);
     const path = utxo ? addrToPath[utxo.address] : undefined;
     return {
       witnessUtxo: {
@@ -1230,14 +1178,7 @@ const buildNonCustodial = async ({ aid, amount, address, feeRate, subtract, user
   return { feeRate, ourfee, fee, fees, hex, inputs, subtract };
 };
 
-export const build = async ({
-  aid,
-  amount,
-  address,
-  feeRate,
-  subtract,
-  user,
-}) => {
+export const build = async ({ aid, amount, address, feeRate, subtract, user }) => {
   const type = await getAddressType(address);
   if (!aid) aid = user.id;
 
@@ -1245,7 +1186,7 @@ export const build = async ({
   if (type === PaymentType.bitcoin) {
     const account = await g(`account:${aid}`);
     if (account?.pubkey) {
-      return buildNonCustodial({ aid, amount, address, feeRate, subtract, user });
+      return buildNonCustodial({ aid, amount, address, feeRate, subtract });
     }
   }
 
@@ -1275,8 +1216,7 @@ export const build = async ({
 
   let outs: any[] = [{ [address]: btc(amount) }];
 
-  if (type === PaymentType.liquid)
-    outs = outs.map((o) => ({ ...o, asset: config.liquid.btc }));
+  if (type === PaymentType.liquid) outs = outs.map((o) => ({ ...o, asset: config.liquid.btc }));
 
   let raw = await node.createRawTransaction([], outs, 0, true);
 
@@ -1641,7 +1581,6 @@ export const importAccountHistory = async (account) => {
     await tbSetBalance(account.id, confirmedTotal);
     await tbSetPending(account.id, 0);
 
-
     account.importedAt = account.importedAt || Date.now();
     await s(`account:${account.id}`, account);
   } catch (e) {
@@ -1649,7 +1588,6 @@ export const importAccountHistory = async (account) => {
     warn("problem importing account history", e.message, account);
   }
 };
-
 
 export const check = async () => {
   if (process.env.URL.includes("dev")) return;
@@ -1753,9 +1691,7 @@ export const reverse = async (p) => {
 const freezeCheck = async () => {
   try {
     const funds = await ln.listfunds();
-    const lnbalance = Math.round(
-      funds.channels.reduce((a, b) => a + b.our_amount_msat, 0) / 1000,
-    );
+    const lnbalance = Math.round(funds.channels.reduce((a, b) => a + b.our_amount_msat, 0) / 1000);
 
     const bcbalance = Math.round((await bc.getBalance()) * SATS);
     const { bitcoin } = await lq.getBalance();

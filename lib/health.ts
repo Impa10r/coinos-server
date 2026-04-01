@@ -43,7 +43,6 @@ async function checkLightningHealth(): Promise<boolean> {
     l("health check: testing lightning connection...");
     const info = (await withTimeout(ln.getinfo(), RPC_TIMEOUT, "getinfo")) as any;
 
-
     if (!info?.id) {
       throw new Error("getinfo returned invalid response (no node id)");
     }
@@ -72,8 +71,7 @@ async function checkLightningHealth(): Promise<boolean> {
       );
     } catch {}
 
-    const duration = Date.now() - startTime;
-    // l(`health check: passed in ${duration}ms, node: ${info.id.slice(0, 16)}...`);
+    // l(`health check: passed in ${Date.now() - startTime}ms, node: ${info.id.slice(0, 16)}...`);
 
     return true;
   } catch (e: any) {

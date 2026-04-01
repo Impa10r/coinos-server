@@ -50,7 +50,11 @@ export default () => {
 
     r.on("open", async (_) => {
       l("nwc connected to strfry");
-      r.subscribe("nwc", { kinds: [23194], "#p": [serverPubkey, serverPubkey2], since: Math.floor(Date.now() / 1000) - nwcEventMaxAgeSeconds });
+      r.subscribe("nwc", {
+        kinds: [23194],
+        "#p": [serverPubkey, serverPubkey2],
+        since: Math.floor(Date.now() / 1000) - nwcEventMaxAgeSeconds,
+      });
       const info = await finalizeEvent(
         {
           created_at: Math.floor(Date.now() / 1000),
@@ -88,73 +92,70 @@ export default () => {
     r.on("error", () => {});
 
     r.on("event", async (sub, ev) => {
-    try {
-      if (sub !== "nwc") return;
-      const now = Math.floor(Date.now() / 1000);
-      if (ev.created_at && now - ev.created_at > nwcEventMaxAgeSeconds) return;
-      if (await db.zScore(handledKey, ev.id)) return;
-
-      // Per-pubkey rate limiting
-      const times = nwcRequestTimes.get(ev.pubkey) || [];
-      const cutoff = Date.now() - nwcRateWindow;
-      const recent = times.filter((t) => t > cutoff);
-      if (recent.length >= nwcRateLimit) return;
-      recent.push(Date.now());
-      nwcRequestTimes.set(ev.pubkey, recent);
-
-      db.zAdd(handledKey, { score: now, value: ev.id });
-      db.zRemRangeByScore(handledKey, 0, now - nwcEventMaxAgeSeconds);
-      const size = await db.zCard(handledKey);
-      if (size > handledMaxSize) {
-        await db.zRemRangeByRank(handledKey, 0, size - handledMaxSize - 1);
-
-      }
-      let { content, pubkey } = ev;
-      const pk = ev.tags.find((t) => t[0] === "p")[1];
-      const sk = serverKeys[pk];
-      const { params, method } = JSON.parse(
-        await nip04.decrypt(sk, pubkey, content),
-      );
-
-      // console.log("nwc", method, params, pubkey);
-
-      if (!methods.includes(method)) return;
-
       try {
-        const app = await g(`app:${pubkey}`);
-        if (!app) fail("pubkey not found");
-        const user = await g(`user:${app.uid}`);
+        if (sub !== "nwc") return;
+        const now = Math.floor(Date.now() / 1000);
+        if (ev.created_at && now - ev.created_at > nwcEventMaxAgeSeconds) return;
+        if (await db.zScore(handledKey, ev.id)) return;
 
-        const result = await handle(method, params, ev, app, user);
-        const payload = JSON.stringify({ result_type: method, ...result });
-        content = await nip04.encrypt(sk, pubkey, payload);
+        // Per-pubkey rate limiting
+        const times = nwcRequestTimes.get(ev.pubkey) || [];
+        const cutoff = Date.now() - nwcRateWindow;
+        const recent = times.filter((t) => t > cutoff);
+        if (recent.length >= nwcRateLimit) return;
+        recent.push(Date.now());
+        nwcRequestTimes.set(ev.pubkey, recent);
 
-        let response: UnsignedEvent = {
-          created_at: Math.floor(Date.now() / 1000),
-          kind: 23195,
-          pubkey: serverPubkey,
-          tags: [
-            ["p", pubkey],
-            ["e", ev.id],
-          ],
-          content,
-        };
+        db.zAdd(handledKey, { score: now, value: ev.id });
+        db.zRemRangeByScore(handledKey, 0, now - nwcEventMaxAgeSeconds);
+        const size = await db.zCard(handledKey);
+        if (size > handledMaxSize) {
+          await db.zRemRangeByRank(handledKey, 0, size - handledMaxSize - 1);
+        }
+        let { content, pubkey } = ev;
+        const pk = ev.tags.find((t) => t[0] === "p")[1];
+        const sk = serverKeys[pk];
+        const { params, method } = JSON.parse(await nip04.decrypt(sk, pubkey, content));
 
-        response = await finalizeEvent(response, hexToBytes(sk));
-        r.send(["EVENT", response]);
-      } catch (e) {
-        // err(
-        //   "problem with nwc",
-        //   pubkey,
-        //   method,
-        //   JSON.stringify(params),
-        //   e.message,
-        // );
+        // console.log("nwc", method, params, pubkey);
+
+        if (!methods.includes(method)) return;
+
+        try {
+          const app = await g(`app:${pubkey}`);
+          if (!app) fail("pubkey not found");
+          const user = await g(`user:${app.uid}`);
+
+          const result = await handle(method, params, ev, app, user);
+          const payload = JSON.stringify({ result_type: method, ...result });
+          content = await nip04.encrypt(sk, pubkey, payload);
+
+          let response: UnsignedEvent = {
+            created_at: Math.floor(Date.now() / 1000),
+            kind: 23195,
+            pubkey: serverPubkey,
+            tags: [
+              ["p", pubkey],
+              ["e", ev.id],
+            ],
+            content,
+          };
+
+          response = await finalizeEvent(response, hexToBytes(sk));
+          r.send(["EVENT", response]);
+        } catch {
+          // err(
+          //   "problem with nwc",
+          //   pubkey,
+          //   method,
+          //   JSON.stringify(params),
+          //   e.message,
+          // );
+        }
+      } catch {
+        // err("problem with nwc", e.message);
       }
-    } catch (e) {
-      // err("problem with nwc", e.message);
-    }
-  });
+    });
   }
 
   connect();
@@ -179,9 +180,7 @@ const handle = (method, params, ev, app, user) =>
 
       const pids = await db.lRange(`${pubkey}:payments`, 0, -1);
       let payments = await Promise.all(pids.map((pid) => g(`payment:${pid}`)));
-      payments = payments.filter(
-        (p) => p?.created > Date.now() - periods[budget_renewal],
-      );
+      payments = payments.filter((p) => p?.created > Date.now() - periods[budget_renewal]);
 
       const spent = payments.reduce(
         (a, b) =>
@@ -196,7 +195,7 @@ const handle = (method, params, ev, app, user) =>
       if (!created) {
         return error({
           code: "UNAUTHORIZED",
-          message: `This NWC connection is no longer valid please create a new one at https://coinos.io/settings/nostr`,
+          message: `This NWC connection is no longer valid please create a new one at https://${config.domain}/settings/nostr`,
         });
       }
 
@@ -337,11 +336,7 @@ const handle = (method, params, ev, app, user) =>
         expiry,
       };
 
-      const {
-        hash,
-        created: created_at,
-        paymentHash,
-      } = await generate({ invoice, user });
+      const { hash, created: created_at, paymentHash } = await generate({ invoice, user });
 
       return result({
         type: "incoming",
@@ -394,8 +389,7 @@ const handle = (method, params, ev, app, user) =>
 
       const { pays } = await ln.listpays({ bolt11: invoice, payment_hash });
 
-      if (!pays.length)
-        return error({ code: "NOT_FOUND", message: "Invoice not found" });
+      if (!pays.length) return error({ code: "NOT_FOUND", message: "Invoice not found" });
 
       const {
         amount_msat: amount,

@@ -91,7 +91,7 @@ export async function init(amount = 100000) {
     });
 
     await s("cash", cash);
-  } catch (e) {}
+  } catch {}
 }
 
 export function request(uuid, amount, memo) {
