@@ -1073,7 +1073,7 @@ const buildNonCustodial = async ({ aid, amount, address, feeRate, subtract }) =>
   const fees: any = await fetch(api.fees).then((r) => r.json());
 
   fees.fastestFee = Math.ceil(fees.fastestFee);
-  for (const k of ["halfHourFee", "hourFee", "economyFee"]) fees[k] = Math.ceil(fees[k] * 10) / 10;
+  for (const k of ["halfHourFee", "hourFee", "minimumFee"]) fees[k] = Math.ceil(fees[k] * 10) / 10;
 
   if (!feeRate) feeRate = fees.halfHourFee;
 
@@ -1197,12 +1197,12 @@ export const build = async ({ aid, amount, address, feeRate, subtract, user }) =
 
   const fees: any =
     type === PaymentType.liquid
-      ? { fastestFee: 0.1, halfHourFee: 0.1, hourFee: 0.1, economyFee: 0.1 }
+      ? { fastestFee: 0.1, halfHourFee: 0.1, hourFee: 0.1, minimumFee: 0.1 }
       : await fetch(api.fees).then((r) => r.json());
 
   if (isBitcoin) {
     fees.fastestFee = Math.ceil(fees.fastestFee);
-    for (const k of ["halfHourFee", "hourFee", "economyFee"])
+    for (const k of ["halfHourFee", "hourFee", "minimumFee"])
       fees[k] = Math.ceil(fees[k] * 10) / 10;
   }
 
@@ -1212,7 +1212,7 @@ export const build = async ({ aid, amount, address, feeRate, subtract, user }) =
     feeRate = fees.halfHourFee;
   }
 
-  if (feeRate < fees.economyFee) fail("fee rate too low");
+  if (feeRate < fees.minimumFee) fail("fee rate too low");
 
   let outs: any[] = [{ [address]: btc(amount) }];
 
