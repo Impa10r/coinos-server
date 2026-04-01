@@ -32,7 +32,6 @@ export default [
   "notify",
   "npub",
   "nsec",
-  "nwc",
   "passkeys",
   "payments",
   "picture",
