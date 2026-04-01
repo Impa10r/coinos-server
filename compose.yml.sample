@@ -50,7 +50,8 @@ services:
       - tb
     security_opt:
       - seccomp:unconfined
-    command: ["bun", "index.ts"]
+    command: ["sh", "-c", "bun install && bun index.ts"]
+    # command: ["bun", "index.ts"]
     environment:
       URL: http://localhost:5173
     ports:
@@ -63,6 +64,7 @@ services:
       - ./data/sockets:/sockets
       - ./data/lnd:/home/bun/app/data/lnd
       - ./mklittlefs:/usr/bin/mklittlefs
+      - /home/bun/app/node_modules
     restart: always
   bc:
     image: asoltys/bitcoin:28.0

@@ -3,7 +3,7 @@ import { db, g } from "$lib/db";
 import { l, warn } from "$lib/logging";
 import { scan } from "$lib/strfry";
 import { fail, fields, getUser, pick } from "$lib/utils";
-import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
+import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import { finalizeEvent, getPublicKey, nip19, verifyEvent } from "nostr-tools";
 import type { Event } from "nostr-tools";
 import { Relay } from "nostr-tools/relay";
