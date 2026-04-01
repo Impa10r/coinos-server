@@ -772,6 +772,7 @@ export default {
       const targetFeeRate = Math.max(Math.ceil(fees.fastestFee), (p.feeRate || 0) + 1);
 
       const bc = rpc(config.bitcoin);
+      if (config["bitcoin"].walletpass) await bc.walletPassphrase(config[type].walletpass, 300);
       const result = await bc.bumpfee(p.hash, { fee_rate: targetFeeRate });
       if (result.errors?.length) fail(result.errors[0]);
 
