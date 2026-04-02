@@ -76,7 +76,7 @@ export async function createCpfpChild(payment: any, targetFeeRate: number) {
   raw = "03000000" + raw.substring(8);
 
   if ((config.bitcoin as any).walletpass)
-    await bc.walletPassphrase((config.bitcoin as any).walletpass, 300);
+    await bc.walletPassphrase((config.bitcoin as any).walletpass, (config.bitcoin as any).walletpassSeconds);
   const { hex } = await bc.signRawTransactionWithWallet(raw);
 
   const decoded = await bc.decodeRawTransaction(hex);
@@ -279,7 +279,7 @@ export async function buildCpfpSend({
 
   // Sign (only the change input needs signing; P2A is keyless)
   if ((config.bitcoin as any).walletpass)
-    await bc.walletPassphrase((config.bitcoin as any).walletpass, 300);
+    await bc.walletPassphrase((config.bitcoin as any).walletpass, (config.bitcoin as any).walletpassSeconds);
   const { hex } = await bc.signRawTransactionWithWallet(raw);
 
   const decoded = await bc.decodeRawTransaction(hex);

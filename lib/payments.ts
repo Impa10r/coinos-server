@@ -790,7 +790,7 @@ export const sendOnchain = async (params) => {
     inflight[txid] = true;
 
     if (!signed) {
-      if (config[type].walletpass) await node.walletPassphrase(config[type].walletpass, 300);
+      if (config[type].walletpass) await node.walletPassphrase(config[type].walletpass, config[type].walletpassSeconds);
 
       ({ hex } = await node.signRawTransactionWithWallet(
         type === PaymentType.liquid ? await node.blindRawTransaction(hex) : hex,

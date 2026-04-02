@@ -773,7 +773,7 @@ export default {
 
       const bc = rpc(config.bitcoin);
       if (config["bitcoin"].walletpass)
-        await bc.walletPassphrase(config["bitcoin"].walletpass, 300);
+        await bc.walletPassphrase(config["bitcoin"].walletpass, config["bitcoin"].walletpassSeconds);
       const result = await bc.bumpfee(p.hash, { fee_rate: targetFeeRate });
       if (result.errors?.length) fail(result.errors[0]);
 
