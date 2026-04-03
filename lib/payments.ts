@@ -1000,7 +1000,6 @@ export const sendLightning = async ({ user, pr, amount, fee = undefined, memo = 
       amount_msat: amount_msat ? undefined : amount * 1000,
       maxfee: fee * 1000,
       retry_for: 30,
-      layers: ["prefer-kappa"],
     });
 
     try {
