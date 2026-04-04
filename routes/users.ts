@@ -4,8 +4,16 @@ const sanitizeImageUrl = (url: string | undefined): string | undefined => {
   if (!url) return url;
   try {
     const u = new URL(url);
-    if (u.pathname.startsWith("/api/public/")) return u.pathname;
-  } catch {}
+    if (u.pathname.startsWith("/api/public/")) {
+      // Strip to just the hash filename so the UI can construct the full path
+      return u.pathname.replace(/^\/api\/public\//, "").replace(/\.webp$/, "");
+    }
+  } catch {
+    // relative path like /api/public/hash.webp or just hash
+    if (url.startsWith("/api/public/")) {
+      return url.replace(/^\/api\/public\//, "").replace(/\.webp$/, "");
+    }
+  }
   return url;
 };
 import config from "$config";
