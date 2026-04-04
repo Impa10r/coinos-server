@@ -21,7 +21,7 @@ import lnd from "$lib/lnd";
 const inFlight = new Set<string>();
 
 const outLn = {
-  async xpay(args: any) {
+  async xpay(args: any, { noFallback = false } = {}) {
     l("cln: paying", args.invstring?.slice(-8), args.amount_msat, "maxfee", args.maxfee);
     inFlight.add(args.invstring);
     try {
@@ -30,7 +30,7 @@ const outLn = {
       return r;
     } catch (e: any) {
       warn("cln: failed", args.invstring?.slice(-8), e.message);
-      if (lnd && !e.message?.includes("already underway")) {
+      if (!noFallback && lnd && !e.message?.includes("already underway")) {
         l("lnd: paying", args.invstring?.slice(-8), args.amount_msat, "maxfee", args.maxfee);
         try {
           const r = await lnd.payinvoice({ ...args, retry_for: 60 });
@@ -950,7 +950,7 @@ export const sendKeysend = async ({
   }
 };
 
-export const sendLightning = async ({ user, pr, amount, fee = undefined, memo = undefined }) => {
+export const sendLightning = async ({ user, pr, amount, fee = undefined, memo = undefined, retryFor = 30 }) => {
   let p;
 
   if (typeof amount !== "undefined") {
@@ -999,8 +999,8 @@ export const sendLightning = async ({ user, pr, amount, fee = undefined, memo = 
       invstring: pr.replace(/\s/g, "").toLowerCase(),
       amount_msat: amount_msat ? undefined : amount * 1000,
       maxfee: fee * 1000,
-      retry_for: 30,
-    });
+      retry_for: retryFor,
+    }, { noFallback: retryFor < 30 });
 
     try {
       if (r.payment_preimage || r.preimage || !r.failed_parts) p = await finalize(r, p);

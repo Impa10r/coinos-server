@@ -265,6 +265,7 @@ const handle = (method, params, ev, app, user) =>
           user,
           pr,
           memo: JSON.stringify(metadata),
+          retryFor: 25,
         });
 
         await db.lPush(`${pubkey}:payments`, pid);
