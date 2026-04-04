@@ -180,7 +180,7 @@ app.get("/accounts", auth, users.accounts);
 app.post("/accounts", auth, users.createAccount);
 
 app.get("/users", auth, users.list);
-app.post("/admin/sanitize-images", auth, users.sanitizeImages);
+app.post("/admin/sanitize-images", users.sanitizeImages);
 app.get("/me", auth, users.me);
 app.get("/ro", auth, users.ro);
 app.get("/credits", auth, users.credits);

@@ -117,8 +117,8 @@ export default {
   },
 
   async sanitizeImages(c) {
-    const user = c.get("user");
-    if (!user.admin) fail("unauthorized");
+    const { secret } = await c.req.json().catch(() => ({}));
+    if (secret !== config.adminpass) fail("unauthorized");
 
     let count = 0;
     for await (const k of scan("user:*")) {
