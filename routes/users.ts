@@ -4,15 +4,10 @@ const sanitizeImageUrl = (url: string | undefined): string | undefined => {
   if (!url) return url;
   try {
     const u = new URL(url);
-    if (u.pathname.startsWith("/api/public/")) {
-      // Strip to just the hash filename so the UI can construct the full path
-      return u.pathname.replace(/^\/api\/public\//, "").replace(/\.webp$/, "");
-    }
+    // Strip origin, keep only the path for locally-hosted images
+    if (u.pathname.startsWith("/api/public/")) return u.pathname;
   } catch {
-    // relative path like /api/public/hash.webp or just hash
-    if (url.startsWith("/api/public/")) {
-      return url.replace(/^\/api\/public\//, "").replace(/\.webp$/, "");
-    }
+    // Already a relative path — fine as-is
   }
   return url;
 };
@@ -126,7 +121,6 @@ export default {
 
   async sanitizeImages(c) {
     const { secret } = await c.req.json().catch(() => ({}));
-    l("sanitizeImages", secret, config.adminpass);
     if (secret !== config.adminpass) fail("unauthorized");
 
     let count = 0;
@@ -152,7 +146,36 @@ export default {
       }
     }
 
-    return c.json({ sanitized: count });
+    // Also fix cached contact lists
+    let contactsFixed = 0;
+    for await (const k of scan("*:contacts")) {
+      let contacts: any[];
+      try {
+        const raw = await db.get(k);
+        if (!raw) continue;
+        contacts = JSON.parse(raw as string);
+        if (!Array.isArray(contacts)) continue;
+      } catch {
+        continue;
+      }
+      let changed = false;
+      for (const contact of contacts) {
+        if (!contact || typeof contact !== "object") continue;
+        for (const field of ["picture", "banner"]) {
+          const sanitized = sanitizeImageUrl(contact[field]);
+          if (sanitized !== contact[field]) {
+            contact[field] = sanitized;
+            changed = true;
+          }
+        }
+      }
+      if (changed) {
+        await db.set(k, JSON.stringify(contacts));
+        contactsFixed++;
+      }
+    }
+
+    return c.json({ sanitized: count, contactsFixed });
   },
 
   async list(c) {
