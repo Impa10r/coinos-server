@@ -1319,7 +1319,7 @@ export default {
 
       const user = c.get("user");
       const uid = user.id;
-      let app = await g(pubkey);
+      let app = await g(`app:${pubkey}`);
 
       if (app && uid !== app.uid) fail("Unauthorized");
       if (secret) pubkey = getPublicKey(hexToBytes(secret));

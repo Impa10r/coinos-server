@@ -2,7 +2,7 @@ import config from "$config";
 import { archive, db, g, gf } from "$lib/db";
 import { generate } from "$lib/invoices";
 import ln from "$lib/ln";
-import { l, warn } from "$lib/logging";
+import { err, l, warn } from "$lib/logging";
 import { handleZap, serverPubkey, serverPubkey2, serverSecret, serverSecret2 } from "$lib/nostr";
 import { sendInternal, sendKeysend, sendLightning } from "$lib/payments";
 import { getBalance } from "$lib/tb";
@@ -143,17 +143,30 @@ export default () => {
 
           response = await finalizeEvent(response, hexToBytes(sk));
           r.send(["EVENT", response]);
-        } catch {
-          // err(
-          //   "problem with nwc",
-          //   pubkey,
-          //   method,
-          //   JSON.stringify(params),
-          //   e.message,
-          // );
+        } catch (e) {
+          err("problem with nwc", pubkey, method, JSON.stringify(params), e.message);
+          try {
+            const payload = JSON.stringify({
+              result_type: method,
+              error: { code: "INTERNAL", message: e.message },
+            });
+            content = await nip04.encrypt(sk, pubkey, payload);
+            let response: UnsignedEvent = {
+              created_at: Math.floor(Date.now() / 1000),
+              kind: 23195,
+              pubkey: serverPubkey,
+              tags: [
+                ["p", pubkey],
+                ["e", ev.id],
+              ],
+              content,
+            };
+            response = await finalizeEvent(response, hexToBytes(sk));
+            r.send(["EVENT", response]);
+          } catch {}
         }
-      } catch {
-        // err("problem with nwc", e.message);
+      } catch (e) {
+        err("problem with nwc", e.message);
       }
     });
   }
