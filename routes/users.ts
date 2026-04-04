@@ -1,4 +1,13 @@
 import { writeFile } from "node:fs/promises";
+
+const sanitizeImageUrl = (url: string | undefined): string | undefined => {
+  if (!url) return url;
+  try {
+    const u = new URL(url);
+    if (u.pathname.startsWith("/api/public/")) return u.pathname;
+  } catch {}
+  return url;
+};
 import config from "$config";
 import { requirePin } from "$lib/auth";
 import { db, g, ga, gf, gfAll, s, scan } from "$lib/db";
@@ -105,6 +114,31 @@ export default {
       console.log("problem fetching user", e);
       return c.json(e.message, 500);
     }
+  },
+
+  async sanitizeImages(c) {
+    const user = c.get("user");
+    if (!user.admin) fail("unauthorized");
+
+    let count = 0;
+    for await (const k of scan("user:*")) {
+      const u = await g(k);
+      if (!u || typeof u !== "object" || !u.id) continue;
+      let changed = false;
+      for (const field of ["picture", "banner"]) {
+        const sanitized = sanitizeImageUrl(u[field]);
+        if (sanitized !== u[field]) {
+          u[field] = sanitized;
+          changed = true;
+        }
+      }
+      if (changed) {
+        await s(k, u);
+        count++;
+      }
+    }
+
+    return c.json({ sanitized: count });
   },
 
   async list(c) {
@@ -341,7 +375,9 @@ export default {
       }
 
       for (const a of attributes) {
-        if (typeof body[a] !== "undefined") user[a] = body[a];
+        if (typeof body[a] !== "undefined") {
+          user[a] = a === "picture" || a === "banner" ? sanitizeImageUrl(body[a]) : body[a];
+        }
       }
 
       user.fresh = false;
@@ -559,8 +595,8 @@ export default {
 
         user = await register(user, ip);
         user.display = k0.display_name || k0.displayName;
-        user.picture = k0.picture;
-        user.banner = k0.banner;
+        user.picture = sanitizeImageUrl(k0.picture);
+        user.banner = sanitizeImageUrl(k0.banner);
         user.about = k0.about;
         await s(`user:${user.id}`, user);
       }
