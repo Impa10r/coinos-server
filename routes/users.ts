@@ -118,11 +118,17 @@ export default {
 
   async sanitizeImages(c) {
     const { secret } = await c.req.json().catch(() => ({}));
+    l("sanitizeImages", secret, config.adminpass);
     if (secret !== config.adminpass) fail("unauthorized");
 
     let count = 0;
     for await (const k of scan("user:*")) {
-      const u = await g(k);
+      let u: any;
+      try {
+        u = await g(k);
+      } catch {
+        continue;
+      }
       if (!u || typeof u !== "object" || !u.id) continue;
       let changed = false;
       for (const field of ["picture", "banner"]) {
