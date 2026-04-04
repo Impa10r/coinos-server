@@ -7,7 +7,10 @@ const sanitizeImageUrl = (url: string | undefined): string | undefined => {
     // Strip origin, keep only the path for locally-hosted images
     if (u.pathname.startsWith("/api/public/")) return u.pathname;
   } catch {
-    // Already a relative path — fine as-is
+    // Bare hash (no slashes, no protocol) — reconstruct full path
+    if (!url.includes("/") && !url.includes(".")) {
+      return `/api/public/${url}.webp`;
+    }
   }
   return url;
 };
