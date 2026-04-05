@@ -215,9 +215,7 @@ function nextTransferId(): bigint {
   return u128(transferIdCounter);
 }
 
-async function logBalance(op: string, aid: string, delta: number) {
-  const account = await getAccount(balanceId(aid)).catch(() => null);
-  const balance = account ? accountBalance(account) : null;
+function logBalance(op: string, aid: string, delta: number, balance: number | null) {
   const sign = delta >= 0 ? "+" : "";
   const line = `${new Date().toISOString()} ${op} ${aid} ${sign}${delta} balance=${balance}\n`;
   appendFileSync("logs/balances.log", line);
@@ -320,7 +318,9 @@ export async function tbDebit(
     } as any;
   }
 
-  await logBalance("debit", aid, -(amount + tip + fee));
+  const prevBalSats = Number(currentBalMicro / MSATS);
+  const debitSats = amount + tip + fee;
+  logBalance("debit", aid, -debitSats, prevBalSats - debitSats);
   return ourfee;
 }
 
@@ -332,6 +332,11 @@ export async function tbCredit(
   isPending: boolean,
 ) {
   const transfers: any[] = [];
+
+  // Read balance before transfer for accurate logging
+  const logAccountId = isPending ? pendingId(aid) : balanceId(aid);
+  const prevAccount = await getAccount(logAccountId).catch(() => null);
+  const prevBalSats = prevAccount ? accountBalance(prevAccount) : 0;
 
   // Transfer house → user balance (or house → pending) in microsats
   const targetAccount = isPending ? pendingId(aid) : balanceId(aid);
@@ -375,10 +380,16 @@ export async function tbCredit(
   }
 
   const results = await client.createTransfers(transfers);
+  const balanceErrors = results.filter((r) => r.index === 0);
+  if (balanceErrors.length > 0) {
+    const codes = balanceErrors.map((r) => r.result).join(", ");
+    throw new Error(`TB credit failed: ${codes}`);
+  }
+  // Warn on fee-credit failures (non-fatal)
   for (const r of results) {
     warn("TB credit transfer error:", r.index, r.result);
   }
-  await logBalance("credit", aid, amount);
+  logBalance("credit", aid, amount, prevBalSats + amount);
 }
 
 export async function tbConfirm(aid: string, amount: number) {
