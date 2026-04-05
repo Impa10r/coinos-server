@@ -117,7 +117,7 @@ export default {
         try {
           const event = JSON.parse(decodeURIComponent(nostr));
           await s(`zap:${id}`, event);
-          metadata = nostr;
+          metadata = decodeURIComponent(nostr);
         } catch (e) {
           err("problem handling zap", e.message);
         }

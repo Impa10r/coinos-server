@@ -37,7 +37,9 @@ export async function publish(ev, url = config.nostr) {
 export async function handleZap(invoice, sender = undefined) {
   try {
     const pubkey = serverPubkey2;
-    const zapreq = JSON.parse(invoice.description);
+    let desc = invoice.description;
+    try { desc = decodeURIComponent(desc); } catch {}
+    const zapreq = JSON.parse(desc);
 
     if (!zapreq.tags || zapreq.tags.length === 0) {
       fail("No tags found");
