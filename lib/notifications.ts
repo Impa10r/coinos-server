@@ -82,8 +82,8 @@ export const nwcNotify = async (p) => {
       let payment_hash = "";
       if (p.type === "lightning") ({ payment_hash } = await ln.decode(p.hash));
       for (const pubkey of pubkeys) {
-        const { notify } = await g(`app:${pubkey}`);
-        if (!notify) continue;
+        const app = await g(`app:${pubkey}`);
+        if (app.notify === false) continue;
 
         l("notifying", pubkey, p.type, p.amount);
         const notification = {
