@@ -94,9 +94,10 @@ export const nwcNotify = async (p) => {
         const app = await g(`app:${pubkey}`);
         if (app.notify === false) continue;
 
-        l("notifying", pubkey, p.type, p.amount, p.ref);
+        l("notifying", pubkey, p.type, p.amount);
         const notification = {
           type: p.amount > 0 ? "incoming" : "outgoing",
+          state: "settled",
           invoice: p.hash,
           description: p.memo,
           preimage: p.ref,
