@@ -453,18 +453,19 @@ const handle = (method, params, ev, app, user) =>
         if (p.amount < 0 && type === "incoming") continue;
         if (p.amount > 0 && type === "outgoing") continue;
 
-        let payment_hash = p.payment_hash || pid;
-        if (p.type === "lightning") {
+        let payment_hash = p.payment_hash;
+        if (!payment_hash && p.type === "lightning") {
           try {
             if (p.amount > 0) {
               const { invoices } = await ln.listinvoices({ invstring: p.hash });
-              payment_hash ||= invoices[0].payment_hash;
+              payment_hash = invoices[0]?.payment_hash;
             } else {
               const { pays } = await ln.listpays({ bolt11: p.hash });
-              payment_hash ||= pays[0].payment_hash;
+              payment_hash = pays[0]?.payment_hash;
             }
           } catch {}
         }
+        payment_hash = payment_hash || pid;
 
         transactions.push({
           type: p.amount > 0 ? "incoming" : "outgoing",
