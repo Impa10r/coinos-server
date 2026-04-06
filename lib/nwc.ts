@@ -10,7 +10,7 @@ import { fail, getInvoice, sleep } from "$lib/utils";
 import rpc from "@coinos/rpc";
 import { hexToBytes } from "@noble/hashes/utils.js";
 import { Relay } from "nostr";
-import { finalizeEvent, nip04 } from "nostr-tools";
+import { finalizeEvent, nip04, nip44 } from "nostr-tools";
 import type { UnsignedEvent } from "nostr-tools";
 
 const serverKeys = {
@@ -133,7 +133,12 @@ export default () => {
         let { content, pubkey } = ev;
         const pk = ev.tags.find((t) => t[0] === "p")[1];
         const sk = serverKeys[pk];
-        const { params, method } = JSON.parse(await nip04.decrypt(sk, pubkey, content));
+        const isNip44 = ev.tags.some((t: string[]) => t[0] === "encryption" && t[1] === "nip44_v2");
+        const skBytes = hexToBytes(sk);
+        const decrypted = isNip44
+          ? nip44.v2.decrypt(content, nip44.v2.utils.getConversationKey(skBytes, pubkey))
+          : await nip04.decrypt(sk, pubkey, content);
+        const { params, method } = JSON.parse(decrypted);
 
         l("nwc method", method, "pubkey", pubkey.slice(0, 8));
 
@@ -149,16 +154,19 @@ export default () => {
 
           const result = await handle(method, params, ev, app, user);
           const payload = JSON.stringify({ result_type: method, ...result });
-          content = await nip04.encrypt(sk, pubkey, payload);
+          const convKey = nip44.v2.utils.getConversationKey(skBytes, pubkey);
+          content = isNip44
+            ? nip44.v2.encrypt(payload, convKey)
+            : await nip04.encrypt(sk, pubkey, payload);
+
+          const responseTags: string[][] = [["p", pubkey], ["e", ev.id]];
+          if (isNip44) responseTags.push(["encryption", "nip44_v2"]);
 
           let response: UnsignedEvent = {
             created_at: Math.floor(Date.now() / 1000),
             kind: 23195,
             pubkey: serverPubkey,
-            tags: [
-              ["p", pubkey],
-              ["e", ev.id],
-            ],
+            tags: responseTags,
             content,
           };
 
@@ -171,15 +179,16 @@ export default () => {
               result_type: method,
               error: { code: "INTERNAL", message: e.message },
             });
-            content = await nip04.encrypt(sk, pubkey, payload);
+            content = isNip44
+              ? nip44.v2.encrypt(payload, nip44.v2.utils.getConversationKey(skBytes, pubkey))
+              : await nip04.encrypt(sk, pubkey, payload);
+            const errTags: string[][] = [["p", pubkey], ["e", ev.id]];
+            if (isNip44) errTags.push(["encryption", "nip44_v2"]);
             let response: UnsignedEvent = {
               created_at: Math.floor(Date.now() / 1000),
               kind: 23195,
               pubkey: serverPubkey,
-              tags: [
-                ["p", pubkey],
-                ["e", ev.id],
-              ],
+              tags: errTags,
               content,
             };
             response = await finalizeEvent(response, hexToBytes(sk));
