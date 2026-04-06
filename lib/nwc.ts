@@ -133,11 +133,25 @@ export default () => {
         let { content, pubkey } = ev;
         const pk = ev.tags.find((t) => t[0] === "p")[1];
         const sk = serverKeys[pk];
-        const isNip44 = ev.tags.some((t: string[]) => t[0] === "encryption" && t[1] === "nip44_v2");
         const skBytes = hexToBytes(sk);
-        const decrypted = isNip44
-          ? nip44.v2.decrypt(content, nip44.v2.utils.getConversationKey(skBytes, pubkey))
-          : await nip04.decrypt(sk, pubkey, content);
+        const convKey = nip44.v2.utils.getConversationKey(skBytes, pubkey);
+        let isNip44 = ev.tags.some((t: string[]) => t[0] === "encryption" && t[1] === "nip44_v2");
+        let decrypted: string;
+        if (isNip44) {
+          decrypted = nip44.v2.decrypt(content, convKey);
+        } else {
+          try {
+            decrypted = await nip04.decrypt(sk, pubkey, content);
+          } catch (e04) {
+            try {
+              decrypted = nip44.v2.decrypt(content, convKey);
+              isNip44 = true;
+            } catch (e44) {
+              warn("nwc decrypt failed nip04:", e04.message, "nip44:", e44.message, "content:", content.slice(0, 20));
+              throw e04;
+            }
+          }
+        }
         const { params, method } = JSON.parse(decrypted);
 
         l("nwc method", method, "pubkey", pubkey.slice(0, 8));
