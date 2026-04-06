@@ -21,6 +21,7 @@ export default {
     "wss://relay.nostr.bg",
     "wss://nostr.orangepill.dev"
   ],
+  nwcRateLimit: 60,
   publicRelay: "wss://relay.coinos.io",
   jwt: "00d0ab4f7738a83feb37f661526512063c41e49278b7c32cba87314269a5788b",
   bitcoin: {
