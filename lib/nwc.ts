@@ -38,7 +38,7 @@ const handledKey = "handled:nwc";
 const handledMaxSize = 200000;
 
 // Per-pubkey rate limiting for NWC requests
-const nwcRateLimit = 5; // max requests per minute per pubkey
+const nwcRateLimit = config.nwcRateLimit ?? 60;
 const nwcRateWindow = 60 * 1000; // 1 minute in ms
 const nwcRequestTimes: Map<string, number[]> = new Map();
 
