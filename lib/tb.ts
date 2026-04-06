@@ -333,10 +333,12 @@ export async function tbCredit(
 ) {
   const transfers: any[] = [];
 
-  // Read balance before transfer for accurate logging
-  const logAccountId = isPending ? pendingId(aid) : balanceId(aid);
-  const prevAccount = await getAccount(logAccountId).catch(() => null);
-  const prevBalSats = prevAccount ? accountBalance(prevAccount) : 0;
+  // Read balance before transfer for logging (only needed for immediate credits)
+  let prevBalSats = 0;
+  if (!isPending) {
+    const prevAccount = await getAccount(balanceId(aid)).catch(() => null);
+    prevBalSats = prevAccount ? accountBalance(prevAccount) : 0;
+  }
 
   // Transfer house → user balance (or house → pending) in microsats
   const targetAccount = isPending ? pendingId(aid) : balanceId(aid);
@@ -389,7 +391,7 @@ export async function tbCredit(
   for (const r of results) {
     warn("TB credit transfer error:", r.index, r.result);
   }
-  logBalance("credit", aid, amount, prevBalSats + amount);
+  if (!isPending) logBalance("credit", aid, amount, prevBalSats + amount);
 }
 
 export async function tbConfirm(aid: string, amount: number) {
@@ -434,6 +436,9 @@ export async function tbConfirm(aid: string, amount: number) {
   for (const r of results) {
     warn("TB confirm transfer error:", r.index, r.result);
   }
+  const newAccount = await getAccount(balanceId(aid));
+  const newBalSats = accountBalance(newAccount);
+  logBalance("credit", aid, amount, newBalSats);
 }
 
 export async function tbReverse(uid: string, total: number, creditAmount: number) {
@@ -480,7 +485,8 @@ export async function tbReverse(uid: string, total: number, creditAmount: number
   for (const r of results) {
     warn("TB reverse transfer error:", r.index, r.result);
   }
-  await logBalance("reverse", uid, total);
+  const revAccount = await getAccount(balanceId(uid));
+  logBalance("reverse", uid, total, accountBalance(revAccount));
 }
 
 export async function tbRefund(uid: string, amount: number) {
@@ -508,7 +514,8 @@ export async function tbRefund(uid: string, amount: number) {
   for (const r of results) {
     warn("TB refund transfer error:", r.index, r.result);
   }
-  await logBalance("refund", uid, amount);
+  const refAccount = await getAccount(balanceId(uid));
+  logBalance("refund", uid, amount, accountBalance(refAccount));
 }
 
 export async function tbSetBalance(aid: string, target: number) {
