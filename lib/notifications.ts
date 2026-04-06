@@ -94,7 +94,7 @@ export const nwcNotify = async (p) => {
         const app = await g(`app:${pubkey}`);
         if (app.notify === false) continue;
 
-        l("notifying", pubkey, p.type, p.amount);
+        l("notifying", pubkey, p.type, p.amount, p.ref);
         const notification = {
           type: p.amount > 0 ? "incoming" : "outgoing",
           invoice: p.hash,
@@ -112,7 +112,7 @@ export const nwcNotify = async (p) => {
           notification,
         });
 
-        const content = await nip04.encrypt(serverSecret2 as any, pubkey as string, payload);
+        const content = nip04.encrypt(serverSecret2 as any, pubkey as string, payload);
 
         const unsigned = {
           content,
