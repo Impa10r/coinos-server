@@ -102,7 +102,17 @@ export default () => {
         const times = nwcRequestTimes.get(ev.pubkey) || [];
         const cutoff = Date.now() - nwcRateWindow;
         const recent = times.filter((t) => t > cutoff);
-        if (recent.length >= nwcRateLimit) return;
+        if (recent.length >= nwcRateLimit) {
+          warn("nwc rate limit", ev.pubkey);
+          const rlPk = ev.tags.find((t) => t[0] === "p")[1];
+          const rlSk = serverKeys[rlPk];
+          const payload = JSON.stringify({ result_type: "rate_limited", error: { code: "RATE_LIMITED", message: "Too many requests" } });
+          const rlContent = await nip04.encrypt(rlSk, ev.pubkey, payload);
+          let response: UnsignedEvent = { created_at: Math.floor(Date.now() / 1000), kind: 23195, pubkey: rlPk, tags: [["p", ev.pubkey], ["e", ev.id]], content: rlContent };
+          response = await finalizeEvent(response, hexToBytes(rlSk));
+          r.send(["EVENT", response]);
+          return;
+        }
         recent.push(Date.now());
         nwcRequestTimes.set(ev.pubkey, recent);
 
@@ -323,7 +333,6 @@ const handle = (method, params, ev, app, user) =>
 
       return result({
         alias,
-        block_hash: await bc.getBlockHash(blockheight),
         block_height: blockheight,
         color,
         pubkey: id,
