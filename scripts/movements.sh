@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 # Usage: ./movements.sh <user-uuid> [limit]
-# Shows payment movements for an account. Checks both Redis (db:6379) and archive (arc:6380).
+# Shows payment movements for an account. Checks both Redis (db) and archive (arc).
 
 set -euo pipefail
 
 UUID="${1:?Usage: $0 <user-uuid> [limit]}"
 LIMIT="${2:-50}"
 
-node --input-type=module <<EOF
+docker exec -i -e UUID="$UUID" -e LIMIT="$LIMIT" app bun run - <<'EOF'
 import { createClient } from "redis";
 
-const uuid = "$UUID";
-const limit = $LIMIT;
+const uuid  = process.env.UUID;
+const limit = parseInt(process.env.LIMIT) || 50;
 
-const db  = createClient({ url: "redis://localhost:6379" });
-const arc = createClient({ url: "redis://localhost:6380" });
+const db  = createClient({ url: "redis://db" });
+const arc = createClient({ url: "redis://arc" });
 await Promise.all([db.connect(), arc.connect()]);
 
 async function get(key) {
@@ -22,10 +22,9 @@ async function get(key) {
   return v ? JSON.parse(v) : null;
 }
 
-// Fetch payment IDs from both stores
 const [main, archived] = await Promise.all([
-  db.lRange(\`\${uuid}:payments\`, 0, -1),
-  arc.lRange(\`\${uuid}:payments\`, 0, -1),
+  db.lRange(`${uuid}:payments`, 0, -1),
+  arc.lRange(`${uuid}:payments`, 0, -1),
 ]);
 const ids = [...new Set([...main, ...archived])];
 
@@ -36,25 +35,19 @@ if (!ids.length) {
 
 const payments = [];
 for (const pid of ids) {
-  const p = await get(\`payment:\${pid}\`);
+  const p = await get(`payment:${pid}`);
   if (p) payments.push(p);
 }
 
-// Sort oldest first for running balance
 payments.sort((a, b) => a.created - b.created);
 
-const fmt  = (n) => (n >= 0 ? "+" : "") + n;
 const dt   = (ms) => new Date(ms).toISOString().replace("T", " ").slice(0, 19);
 const pad  = (s, n) => String(s ?? "").padEnd(n);
 const rpad = (s, n) => String(s ?? "").padStart(n);
 
 console.log(
-  pad("date", 20) +
-  pad("type", 10) +
-  rpad("amount", 9) +
-  rpad("fee", 7) +
-  rpad("ourfee", 8) +
-  rpad("balance", 9) +
+  pad("date", 20) + pad("type", 10) +
+  rpad("amount", 9) + rpad("fee", 7) + rpad("ourfee", 8) + rpad("balance", 9) +
   "  hash/id"
 );
 console.log("-".repeat(120));
@@ -71,9 +64,8 @@ for (const p of shown) {
 
   const hash = (p.hash || p.ref || p.id || "").slice(0, 40);
   console.log(
-    pad(dt(p.created), 20) +
-    pad(p.type, 10) +
-    rpad(fmt(amt), 9) +
+    pad(dt(p.created), 20) + pad(p.type, 10) +
+    rpad((amt >= 0 ? "+" : "") + amt, 9) +
     rpad(fee    ? "-" + fee    : "", 7) +
     rpad(ourfee ? "-" + ourfee : "", 8) +
     rpad(running, 9) +
@@ -82,7 +74,7 @@ for (const p of shown) {
 }
 
 console.log("-".repeat(120));
-console.log(\`\${payments.length} total payments (showing last \${shown.length})\`);
+console.log(`${payments.length} total payments (showing last ${shown.length})`);
 
 await Promise.all([db.quit(), arc.quit()]);
 EOF

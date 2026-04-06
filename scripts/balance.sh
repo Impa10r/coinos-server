@@ -1,29 +1,25 @@
 #!/usr/bin/env bash
-# Usage: ./balance.sh <user-uuid>
+# Usage: ./scripts/balance.sh <user-uuid>
 # Looks up the current TigerBeetle balance for a user account.
 
 set -euo pipefail
 
 UUID="${1:?Usage: $0 <user-uuid>}"
 
-# Convert UUID to 128-bit integer (same logic as uuidToBigInt in tb.ts)
-HEX="${UUID//-/}"
-ACCOUNT_ID=$(python3 -c "print(int('$HEX', 16))")
-
-node --input-type=module <<EOF
+docker exec -i -e UUID="$UUID" app bun run - <<'EOF'
 import { createClient } from "tigerbeetle-node";
+import { lookup } from "node:dns/promises";
 
-const clusterId = 0n;
-const replicaAddresses = ["127.0.0.1:3001"];
+const uuid = process.env.UUID;
+const { address: tbIp } = await lookup("tb").catch(() => ({ address: "127.0.0.1" }));
+const client = createClient({ cluster_id: 0n, replica_addresses: [`${tbIp}:3000`] });
 
-const client = createClient({ cluster_id: clusterId, replica_addresses: replicaAddresses });
-
-const uuid = "$UUID";
 const hex = uuid.replace(/-/g, "");
 const id = BigInt("0x" + hex);
 const MSATS = 1_000_000n;
+const mask = (1n << 128n) - 1n;
 
-const accounts = await client.lookupAccounts([id]);
+const accounts = await client.lookupAccounts([id & mask]);
 if (accounts.length === 0) {
   console.error("Account not found:", uuid);
   process.exit(1);
