@@ -1630,7 +1630,6 @@ const finalize = async (r, p) => {
 
   await db.sRem("pending", p.hash);
   l("payment completed", p.id, preimage);
-  nwcNotify(p);
 
   const maxfee = p.fee;
   const { amount_msat, invoice_amount_msat } = await ln.decode(p.hash);
@@ -1655,6 +1654,7 @@ const finalize = async (r, p) => {
     await tbRefund(p.uid, maxfee - p.fee);
   }
 
+  nwcNotify(p);
   return p;
 };
 
