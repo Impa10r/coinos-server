@@ -135,7 +135,7 @@ export default () => {
         const sk = serverKeys[pk];
         const { params, method } = JSON.parse(await nip04.decrypt(sk, pubkey, content));
 
-        // console.log("nwc", method, params, pubkey);
+        l("nwc method", method, "pubkey", pubkey.slice(0, 8));
 
         if (!methods.includes(method)) return;
 
