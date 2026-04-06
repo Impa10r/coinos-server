@@ -1644,7 +1644,7 @@ const finalize = async (r, p) => {
   );
   p.fee = Math.max(
     0,
-    Math.ceil((r.amount_sent_msat - (amount_msat || invoice_amount_msat)) / 1000),
+    Math.round((r.amount_sent_msat - (amount_msat || invoice_amount_msat)) / 1000),
   );
   p.ref = preimage;
 

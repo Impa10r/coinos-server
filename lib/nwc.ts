@@ -282,7 +282,7 @@ const handle = (method, params, ev, app, user) =>
       try {
         const { id: pid } = await sendLightning({
           amount,
-          fee: max_fee || Math.round(amount * 0.01),
+          fee: max_fee > 0 ? max_fee : undefined,
           user,
           pr,
           memo: JSON.stringify(metadata),
