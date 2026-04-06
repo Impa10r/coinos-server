@@ -477,7 +477,7 @@ const handle = (method, params, ev, app, user) =>
           fees_paid: (p?.fee || 0) * 1000,
           created_at,
           expires_at: created_at + week,
-          settled_at: p.amount > 0 ? created_at : undefined,
+          settled_at: created_at,
           state: "settled",
           metadata: {},
         });
