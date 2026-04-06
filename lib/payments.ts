@@ -972,7 +972,8 @@ export const sendLightning = async ({ user, pr, amount, fee = undefined, memo = 
   const minfee = isDirect ? 0 : Math.max(10, Math.round(amount * 0.005));
 
   const parsedFee = Number.parseInt(fee);
-  fee = Math.max(Number.isNaN(parsedFee) ? minfee : parsedFee, minfee);
+  const userSetFee = !Number.isNaN(parsedFee);
+  fee = userSetFee ? parsedFee : minfee;
 
   if (fee < 0) fail("Fee cannot be negative");
 
