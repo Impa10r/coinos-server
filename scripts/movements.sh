@@ -7,7 +7,10 @@ set -euo pipefail
 UUID="${1:?Usage: $0 <user-uuid> [limit]}"
 LIMIT="${2:-50}"
 
-docker exec -i -e UUID="$UUID" -e LIMIT="$LIMIT" app bun run - <<'EOF'
+TMP=$(mktemp /tmp/movements.XXXXXX.mjs)
+trap 'rm -f "$TMP"' EXIT
+
+cat > "$TMP" <<'JSEOF'
 import { createClient } from "redis";
 
 const uuid  = process.env.UUID;
@@ -77,4 +80,7 @@ console.log("-".repeat(120));
 console.log(`${payments.length} total payments (showing last ${shown.length})`);
 
 await Promise.all([db.quit(), arc.quit()]);
-EOF
+JSEOF
+
+docker cp "$TMP" app:/tmp/movements.mjs
+docker exec -e UUID="$UUID" -e LIMIT="$LIMIT" app bun run /tmp/movements.mjs

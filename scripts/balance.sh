@@ -6,7 +6,10 @@ set -euo pipefail
 
 UUID="${1:?Usage: $0 <user-uuid>}"
 
-docker exec -i -e UUID="$UUID" app bun run - <<'EOF'
+TMP=$(mktemp /tmp/balance.XXXXXX.mjs)
+trap 'rm -f "$TMP"' EXIT
+
+cat > "$TMP" <<'JSEOF'
 import { createClient } from "tigerbeetle-node";
 import { lookup } from "node:dns/promises";
 
@@ -36,4 +39,7 @@ console.log("  debits_posted: ", acct.debits_posted.toString());
 console.log("  (microsats net):", micro.toString());
 
 client.destroy();
-EOF
+JSEOF
+
+docker cp "$TMP" app:/tmp/balance.mjs
+docker exec -e UUID="$UUID" app bun run /tmp/balance.mjs
