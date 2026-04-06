@@ -95,8 +95,16 @@ export default () => {
       try {
         if (sub !== "nwc") return;
         const now = Math.floor(Date.now() / 1000);
-        if (ev.created_at && now - ev.created_at > nwcEventMaxAgeSeconds) return;
-        if (await db.zScore(handledKey, ev.id)) return;
+        const age = now - ev.created_at;
+        l("nwc event", ev.id.slice(0, 8), "pubkey", ev.pubkey.slice(0, 8), "age", age);
+        if (ev.created_at && age > nwcEventMaxAgeSeconds) {
+          warn("nwc event too old", age, ev.id.slice(0, 8));
+          return;
+        }
+        if (await db.zScore(handledKey, ev.id)) {
+          warn("nwc event already handled", ev.id.slice(0, 8));
+          return;
+        }
 
         // Per-pubkey rate limiting
         const times = nwcRequestTimes.get(ev.pubkey) || [];
@@ -133,7 +141,10 @@ export default () => {
 
         try {
           const app = await g(`app:${pubkey}`);
-          if (!app) fail("pubkey not found");
+          if (!app) {
+            warn("nwc app not found for pubkey", pubkey.slice(0, 8));
+            fail("pubkey not found");
+          }
           const user = await g(`user:${app.uid}`);
 
           const result = await handle(method, params, ev, app, user);
