@@ -1001,7 +1001,7 @@ export const sendLightning = async ({ user, pr, amount, fee = undefined, memo = 
       amount_msat: amount_msat ? undefined : amount * 1000,
       maxfee: fee * 1000,
       retry_for: retryFor,
-    }, { noFallback: retryFor < 30 });
+    }, { noFallback: retryFor < 20 });
 
     try {
       if (r.payment_preimage || r.preimage || !r.failed_parts) p = await finalize(r, p);
