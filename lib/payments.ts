@@ -800,7 +800,7 @@ export const sendOnchain = async (params) => {
     ({ txid } = await node.decodeRawTransaction(hex));
 
     const r = await node.testMempoolAccept([hex]);
-    if (!r[0].allowed) fail("transaction rejected");
+    if (!r[0].allowed) fail(`transaction rejected: ${r[0]["reject-reason"]}`);
 
     let total = 0;
     let fee = 0;
@@ -871,7 +871,7 @@ export const sendOnchain = async (params) => {
         ({ txid } = await node.decodeRawTransaction(hex));
 
         const r2 = await node.testMempoolAccept([hex]);
-        if (!r2[0].allowed) fail("rebuilt transaction rejected");
+        if (!r2[0].allowed) fail(`rebuilt transaction rejected: ${r2[0]["reject-reason"]}`);
 
         fee = buildResult.fee || 0;
       }

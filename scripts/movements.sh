@@ -52,7 +52,7 @@ docker exec app bun -e "
     const ourfee = parseInt(p.ourfee) || 0;
     const tip    = parseInt(p.tip)    || 0;
     running += amt < 0 ? amt - fee - ourfee - tip : amt + tip;
-    const hash = (p.hash || p.ref || p.id || '').slice(0, 64);;
+    const hash = p.hash || p.ref || p.id || '';
     console.log(pad(dt(p.created), 20) + pad(p.type, 10) + rpad((amt >= 0 ? '+' : '') + amt, 9) + rpad(fee ? '-' + fee : '', 7) + rpad(ourfee ? '-' + ourfee : '', 8) + rpad(running, 9) + '  ' + hash);
   }
 
