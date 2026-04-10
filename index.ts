@@ -88,6 +88,11 @@ app.get("/assetlinks.json", (_c) => {
 });
 app.get("/mls/users", nostr.mlsUsers);
 app.get("/nostr.json", nostr.identities);
+app.get("/.well-known/security.txt", (c) =>
+  c.text(
+    `Contact: https://igit.me/Coinos\nExpires: 2097-01-01T00:00:00.000Z\nPreferred-Languages: en\n`,
+  ),
+);
 app.get("/profile/:profile", nostr.profile);
 app.get("/:pubkey/count", nostr.count);
 app.get("/:pubkey/followers", nostr.followers);
