@@ -183,7 +183,7 @@ export default {
 
   async list(c) {
     const user = c.get("user");
-    if (!user.admin) fail("unauthorized");
+    if (!user.admin) return c.json("unauthorized", 401);
 
     const users = [];
 
@@ -481,7 +481,10 @@ export default {
       const fk = `${username}:failures`;
       const ipFailKey = `ip:${ip}:login:fail`;
       const ipFailures = await g(ipFailKey);
-      if (!isAdmin && Number(ipFailures) > 20) return c.json({}, 429);
+      if (!isAdmin && Number(ipFailures) > 5) return c.json({ message: "locked" }, 429);
+
+      const userFailures = await g(fk);
+      if (!isAdmin && Number(userFailures) > 5) return c.json({ message: "locked" }, 429);
 
       let user = await getUser(username);
 
@@ -492,10 +495,11 @@ export default {
         } catch {}
 
         if (!user || !verified) {
-          await db.incrBy(ipFailKey, 1);
-          if (Number(await db.ttl(ipFailKey)) < 0) await db.expire(ipFailKey, 600);
-          await db.incrBy(fk, 1);
-          setTimeout(() => db.decrBy(fk, 1), 120000);
+          const newIpFails = await db.incrBy(ipFailKey, 1);
+          if (newIpFails === 1) await db.expire(ipFailKey, 600);
+          const newUserFails = await db.incrBy(fk, 1);
+          if (newUserFails === 1) await db.expire(fk, 600);
+          await new Promise((r) => setTimeout(r, 5000));
           return c.json({}, 401);
         }
 
