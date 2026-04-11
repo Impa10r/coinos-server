@@ -307,6 +307,7 @@ Bun.serve({
   websocket,
   port,
   hostname: host_,
+  idleTimeout: 60,
 });
 
 l(`coinos server listening on ${host_}:${port}`);
