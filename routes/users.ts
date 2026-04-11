@@ -417,6 +417,10 @@ export default {
       for (const a of attributes) {
         if (typeof body[a] !== "undefined") {
           user[a] = a === "picture" || a === "banner" ? sanitizeImageUrl(body[a]) : body[a];
+          if (a === "picture" && body[a]) {
+            const match = sanitizeImageUrl(body[a]).match(/\/api\/public\/([a-f0-9]+)\.webp$/);
+            if (match) user.profile = match[1];
+          }
         }
       }
 
