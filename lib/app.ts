@@ -23,6 +23,9 @@ app.use(
   serveStatic({
     root: "/home/bun/app/data/uploads",
     rewriteRequestPath: (p) => p.replace("/public", ""),
+    onFound: (_path, c) => {
+      c.res.headers.set("cache-control", "public, max-age=31536000, immutable");
+    },
   }),
 );
 
