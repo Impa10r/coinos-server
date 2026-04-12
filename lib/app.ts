@@ -16,6 +16,13 @@ app.use(
     credentials: true,
   }),
 );
+app.use("*", async (c, next) => {
+  await next();
+  if (c.req.path.startsWith("/public/")) {
+    c.res.headers.delete("vary");
+    c.res.headers.delete("last-modified");
+  }
+});
 
 // Static files
 app.use("/public/*", async (c, next) => {
