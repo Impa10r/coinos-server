@@ -25,6 +25,7 @@ app.use(
     rewriteRequestPath: (p) => p.replace("/public", ""),
     onFound: (_path, c) => {
       c.res.headers.set("cache-control", "public, max-age=31536000, immutable");
+      c.res.headers.delete("vary");
     },
   }),
 );
