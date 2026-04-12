@@ -10,7 +10,7 @@ const resLogger = pino(pino.destination("res"));
 
 // CORS
 app.use(
-  "*",
+  /^(?!\/public\/).*/,
   cors({
     origin: (origin) => origin || "*",
     credentials: true,
