@@ -38,8 +38,8 @@ rsync -az --delete \
   "${DEST}/lightning/bitcoin/" 2>/dev/null || true
 
 # --- LND: wallet + channel DB ---
-rsync -az --delete \
+rsync -az --delete --exclude=chan-backup-archives \
   "${HOME}/.lnd/data/chain/bitcoin/mainnet/" \
-  "${BASE}/.lnd/data/graph/mainnet/" \
+  "${HOME}/.lnd/data/graph/mainnet/" \
   "${HOME}/.lnd/lnd.conf" \
   "${DEST}/lnd/" 2>/dev/null || true
