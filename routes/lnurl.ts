@@ -7,15 +7,31 @@ import { getFundBalance, tbFundCredit, tbFundDebit } from "$lib/tb";
 import { SATS, bail, fail, getInvoice, getUser } from "$lib/utils";
 import { bech32 } from "bech32";
 import got from "got";
+import { SocksProxyAgent } from "socks-proxy-agent";
 import { v4 } from "uuid";
 
 import { PaymentType } from "$lib/types";
 
-const { URL } = process.env;
+const { URL, LNURL_PROXY } = process.env;
 const host = URL.split("/").at(-1);
 const fiveMinutes = 1000 * 60 * 5;
 
+const proxyAgent = LNURL_PROXY ? new SocksProxyAgent(LNURL_PROXY) : undefined;
+
 export default {
+  async proxy(c) {
+    const url = c.req.query("url");
+    if (!url) return bail(c, "url required");
+    try {
+      const opts = proxyAgent ? { agent: { http: proxyAgent, https: proxyAgent } } : {};
+      const r = await got(url, opts).json();
+      return c.json(r);
+    } catch (e) {
+      warn("lnurl proxy failed", url, e.message);
+      return bail(c, e.message);
+    }
+  },
+
   async encode(c) {
     const address = c.req.query("address");
     const [name, domain] = address.split("@");

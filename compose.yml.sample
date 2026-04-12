@@ -54,6 +54,7 @@ services:
     # command: ["bun", "index.ts"]
     environment:
       URL: http://localhost:5173
+      LNURL_PROXY: socks5://127.0.0.1:9050
     ports:
       - '3119:3119'
     volumes:

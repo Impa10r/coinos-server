@@ -157,6 +157,7 @@ app.get("/square/connect", auth, square.connect);
 app.get("/square/auth", auth, square.auth);
 app.post("/square/payment", square.payment);
 
+app.get("/lnurl/proxy", lnurl.proxy);
 app.get("/encode", lnurl.encode);
 app.get("/decode", lnurl.decode);
 app.get("/lnurl/verify/:id", lnurl.verify);
