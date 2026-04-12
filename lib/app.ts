@@ -23,12 +23,14 @@ app.use(
   serveStatic({
     root: "/home/bun/app/data/uploads",
     rewriteRequestPath: (p) => p.replace("/public", ""),
-    onFound: (_path, c) => {
-      c.res.headers.set("cache-control", "public, max-age=31536000, immutable");
-      c.res.headers.delete("vary");
-    },
   }),
 );
+app.use("/public/*", async (c, next) => {
+  await next();
+  c.res.headers.set("cache-control", "public, max-age=31536000, immutable");
+  c.res.headers.delete("vary");
+  c.res.headers.delete("last-modified");
+});
 
 // Rate limiting (disabled in development)
 const prod = process.env.NODE_ENV === "production";
