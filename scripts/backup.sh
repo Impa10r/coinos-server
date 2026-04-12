@@ -28,14 +28,9 @@ rsync -az --delete "${BASE}/db/" "${DEST}/db/"
 # --- Kvrocks ---
 rsync -az --delete "${BASE}/archive-kv/" "${DEST}/archive-kv/"
 
-# --- CLN: hsm_secret + channel DB ---
+# --- CLN: full directory, preserving structure ---
 rsync -az --delete \
-  "${BASE}/lightning/config" \
-  "${BASE}/lightning/bitcoin/hsm_secret" \
-  "${BASE}/lightning/bitcoin/lightningd.sqlite3" \
-  "${BASE}/lightning/bitcoin/lightningd.sqlite3-wal" \
-  "${BASE}/lightning/bitcoin/lightningd.sqlite3-shm" \
-  "${DEST}/lightning/bitcoin/" 2>/dev/null || true
+  "${BASE}/lightning/" "${DEST}/lightning/" 2>/dev/null || true
 
 # --- LND: full directory, preserving structure ---
 rsync -az --delete --exclude=chan-backup-archives \
