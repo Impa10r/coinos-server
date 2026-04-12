@@ -25,11 +25,6 @@ const connect = async () => {
         rates[symbol] = msg.c * fx[symbol];
       });
 
-      try {
-        rates.IRT = (
-          (await got("https://api.nobitex.ir/v2/orderbook/BTCIRT").json()) as any
-        ).lastTradePrice;
-      } catch {}
 
       rate = msg.c;
       s("rate", rate);
