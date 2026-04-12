@@ -27,3 +27,19 @@ rsync -az --delete "${BASE}/db/" "${DEST}/db/"
 
 # --- Kvrocks ---
 rsync -az --delete "${BASE}/archive-kv/" "${DEST}/archive-kv/"
+
+# --- CLN: hsm_secret + channel DB ---
+rsync -az --delete \
+  "${BASE}/lightning/config" \
+  "${BASE}/lightning/bitcoin/hsm_secret" \
+  "${BASE}/lightning/bitcoin/lightningd.sqlite3" \
+  "${BASE}/lightning/bitcoin/lightningd.sqlite3-wal" \
+  "${BASE}/lightning/bitcoin/lightningd.sqlite3-shm" \
+  "${DEST}/lightning/bitcoin/" 2>/dev/null || true
+
+# --- LND: wallet + channel DB ---
+rsync -az --delete \
+  "${HOME}/.lnd/data/chain/bitcoin/mainnet/" \
+  "${BASE}/.lnd/data/graph/mainnet/" \
+  "${HOME}/.lnd/lnd.conf" \
+  "${DEST}/lnd/" 2>/dev/null || true
