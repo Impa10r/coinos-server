@@ -201,6 +201,8 @@ export const debit = async ({
   user,
   type = PaymentType.internal,
   rate = undefined,
+  ourfee: ourfeeOverride = undefined,
+  creditType: creditTypeOverride = undefined,
 }) => {
   amount = Number.parseInt(amount);
 
@@ -262,6 +264,8 @@ export const debit = async ({
     ? Math.round((amount + fee + tip) * config.fee[creditType])
     : 0;
 
+  if (creditTypeOverride) creditType = creditTypeOverride;
+  if (ourfeeOverride !== undefined) ourfee = ourfeeOverride;
   if (aid !== uid) ourfee = 0;
   const frozenBalance = !blacklisted || whitelisted ? 0 : await getBalance(uid);
 
@@ -323,6 +327,9 @@ export const credit = async ({
   type = PaymentType.internal,
   aid = undefined,
   payment_hash = undefined,
+  assetAmount = undefined,
+  assetType = undefined,
+  ourfee = undefined,
 }) => {
   amount = Number.parseInt(amount) || 0;
 
@@ -384,6 +391,9 @@ export const credit = async ({
     confirmed: true,
     created: Date.now(),
     items: undefined,
+    ...(assetAmount !== undefined && { assetAmount }),
+    ...(assetType !== undefined && { assetType }),
+    ...(ourfee !== undefined && { ourfee }),
   };
 
   if ([PaymentType.bitcoin, PaymentType.liquid].includes(type)) inv.pending += amount;
@@ -403,7 +413,7 @@ export const credit = async ({
     await s(`payment:${hash}`, id);
   }
 
-  let creditType = type;
+  let creditType = assetType === "USDT" ? "usdt" : type;
   if (creditType === PaymentType.bolt12) creditType = PaymentType.lightning;
   const isPending = balanceKey === "pending";
 
@@ -909,6 +919,47 @@ export const sendOnchain = async (params) => {
     delete inflight[txid];
     throw e;
   }
+};
+
+export const sendUsdt = async ({ address, amount, user }) => {
+  const { id: uid } = user;
+  const rates = await g("rates");
+  const usdtRate = rates["USDT"] || rates["USD"];
+  const effectiveRate = usdtRate / (1 + (config.fee as any).usdt); // fx fee baked into rate; lower than mid since user sells BTC
+  const btcSats = Math.round((amount / effectiveRate) * SATS);
+  const liquidFee = Math.round(btcSats * config.fee.liquid); // covered by credits if available
+
+  const { rate, currency } = await getUserRate(user);
+
+  const p = await debit({
+    aid: uid,
+    hash: address,
+    amount: btcSats,
+    fee: 0,
+    ourfee: liquidFee,
+    rate,
+    user,
+    type: PaymentType.liquid,
+    creditType: "usdt",
+  });
+
+  if (config.liquid.walletpass)
+    await lq.walletPassphrase(config.liquid.walletpass, 300);
+
+  const txid = await lq.sendToAddress(
+    address,
+    amount,
+    "", "", false, false, 1, "UNSET", false,
+    (config.liquid as any).usdt,
+  );
+
+  p.hash = txid;
+  p.assetAmount = amount;
+  p.assetType = "USDT";
+  await s(`payment:${p.id}`, p);
+
+  l(user.username, "sent USDT", amount, "→", txid);
+  return p;
 };
 
 export const sendKeysend = async ({

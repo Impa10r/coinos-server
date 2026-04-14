@@ -174,6 +174,8 @@ app.post("/confirm", payments.confirm);
 app.post("/bitcoin/tx", payments.txWebhook);
 app.post("/bitcoin/fee", auth, payments.fee);
 app.post("/bitcoin/send", auth, payments.send);
+app.post("/liquid/usdt/send", auth, payments.sendUsdt);
+app.get("/liquid/usdt/balance", auth, payments.usdtBalance);
 app.post("/ark/send", auth, payments.ark);
 app.post("/ark/vault-send", auth, payments.arkVaultSend);
 app.post("/ark/vault-receive", auth, payments.arkVaultReceive);

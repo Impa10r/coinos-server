@@ -47,7 +47,8 @@ export default {
     walletpass: "",
     network: "regtest",
     port: 7040,
-    btc: "5ac9f65c0efcc4775e0baec4ec03abdde22473cd3cf33c0419ca290e0751b225"
+    btc: "5ac9f65c0efcc4775e0baec4ec03abdde22473cd3cf33c0419ca290e0751b225",
+    usdt: "2dcf5a8834645654911964ec3602426fd3b9b4017554d3f9c19403e7fc1411d3",
   },
   lightning: "/home/bun/app/data/lightning/regtest/lightning-rpc",
   lightningb: "/home/bun/app/data/lightningb/regtest/lightning-rpc",
@@ -60,6 +61,7 @@ export default {
     bitcoin: 0.004,   // 0.4%
     liquid: 0.001,    // 0.1%
     lightning: 0.001, // 0.1%
+    usdt: 0.0015,     // 0.15%
   },
   adminpass: "pwa",
   txWebhookSecret: process.env.TX_WEBHOOK_SECRET || "pwa",

@@ -22,6 +22,7 @@ import {
   sendInternal,
   sendLightning,
   sendOnchain,
+  sendUsdt,
   syncBitcoinVault,
 } from "$lib/payments";
 import { emit } from "$lib/sockets";
@@ -40,6 +41,8 @@ import { SATS, bail, fail, fields, getInvoice, getPayment, getUser, pick, sats }
 import rpc from "@coinos/rpc";
 import got from "got";
 import { v4 } from "uuid";
+
+const lq = rpc(config.liquid);
 
 export default {
   async info(c) {
@@ -576,7 +579,9 @@ export default {
 
       for (const { address, amount, asset, category, vout } of details) {
         if (!address) continue;
-        if (asset !== config.liquid.btc) continue;
+        const isLbtc = asset === config.liquid.btc;
+        const isUsdt = asset === (config.liquid as any).usdt;
+        if (!isLbtc && !isUsdt) continue;
 
         if (category === "send") continue;
 
@@ -584,7 +589,25 @@ export default {
 
         if (!p) {
           await getInvoice(address);
-          if (sats(amount) < 300) continue;
+
+          let creditAmount: number;
+          let extraFields: Record<string, any> = {};
+
+          if (isUsdt) {
+            const rates = await g("rates");
+            const usdtRate = rates["USDT"] || rates["USD"];
+            const effectiveRate = usdtRate * (1 + (config.fee as any).usdt); // higher than mid: user gets fewer sats per USDT
+            creditAmount = Math.round((amount / effectiveRate) * SATS);
+            extraFields = {
+              assetAmount: amount,
+              assetType: "USDT",
+            };
+            l("usdt received", amount, "USDT →", creditAmount, "sats after fee");
+          } else {
+            creditAmount = sats(amount);
+          }
+
+          if (creditAmount < 300) continue;
 
           const lockKey = `lock:${txid}:${vout}`;
           const locked = await db.setNX(lockKey, "1");
@@ -593,9 +616,10 @@ export default {
 
           await credit({
             hash: address,
-            amount: sats(amount),
+            amount: creditAmount,
             ref: `${txid}:${vout}`,
             type,
+            ...extraFields,
           });
         } else if (confirmations >= 1) {
           if (p.confirmed) continue;
@@ -1248,6 +1272,29 @@ export default {
       } finally {
         await db.del(lockKey);
       }
+    } catch (e) {
+      return bail(c, e.message);
+    }
+  },
+
+  async sendUsdt(c) {
+    const body = await c.req.json();
+    const user = c.get("user");
+    try {
+      const p = await sendUsdt({ ...body, user });
+      return c.json(p);
+    } catch (e) {
+      warn("usdt send failed", e.message, user.username);
+      return bail(c, e.message);
+    }
+  },
+
+  async usdtBalance(c) {
+    try {
+      const balances = await lq.getBalance();
+      const assetId = (config.liquid as any).usdt;
+      const amount = balances[assetId] || 0;
+      return c.json({ amount });
     } catch (e) {
       return bail(c, e.message);
     }
