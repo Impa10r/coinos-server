@@ -29,9 +29,9 @@ rsync -az --delete "${BASE}/db/" "${DEST}/db/"
 rsync -az --delete "${BASE}/archive-kv/" "${DEST}/archive-kv/"
 
 # --- CLN: full directory, preserving structure ---
-rsync -az --delete \
+rsync -az --delete --exclude=cln.log --exclude=.gossip_store\
   "${BASE}/lightning/" "${DEST}/lightning/" 2>/dev/null || true
 
 # --- LND: full directory, preserving structure ---
-rsync -az --delete --exclude=chan-backup-archives \
+rsync -az --delete --exclude=chan-backup-archives --exclude=logs \
   "${HOME}/.lnd/" "${DEST}/lnd/" 2>/dev/null || true
