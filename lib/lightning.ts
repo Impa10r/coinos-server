@@ -61,7 +61,9 @@ export async function listenForLightning() {
       if (invoice?.memo) {
         try {
           let desc = description;
-          try { desc = decodeURIComponent(desc); } catch {}
+          try {
+            desc = decodeURIComponent(desc);
+          } catch {}
           if (JSON.parse(desc).kind === 9734) {
             const { pubkey } = await getUser(invoice.uid);
             handleZap(inv, pubkey);

@@ -90,7 +90,8 @@ export default {
       const { address, message, type = "bitcoin" } = body;
       const node = rpc(config[type]);
 
-      if (config[type].walletpass) await node.walletPassphrase(config[type].walletpass, config[type].walletpassSeconds);
+      if (config[type].walletpass)
+        await node.walletPassphrase(config[type].walletpass, config[type].walletpassSeconds);
 
       const signature = await node.signMessage({ address, message });
       return c.json({ signature });

@@ -109,7 +109,7 @@ import { bech32 } from "bech32";
 import got from "got";
 import { v4 } from "uuid";
 
-import { PaymentType } from "$lib/types";
+import { Payment, PaymentType } from "$lib/types";
 
 const bc = rpc(config.bitcoin);
 const lq = rpc(config.liquid);
@@ -413,7 +413,7 @@ export const credit = async ({
     await s(`payment:${hash}`, id);
   }
 
-  let creditType = assetType === "USDT" ? "usdt" : type;
+  let creditType = type;
   if (creditType === PaymentType.bolt12) creditType = PaymentType.lightning;
   const isPending = balanceKey === "pending";
 
@@ -800,7 +800,8 @@ export const sendOnchain = async (params) => {
     inflight[txid] = true;
 
     if (!signed) {
-      if (config[type].walletpass) await node.walletPassphrase(config[type].walletpass, config[type].walletpassSeconds);
+      if (config[type].walletpass)
+        await node.walletPassphrase(config[type].walletpass, config[type].walletpassSeconds);
 
       ({ hex } = await node.signRawTransactionWithWallet(
         type === PaymentType.liquid ? await node.blindRawTransaction(hex) : hex,
@@ -927,29 +928,32 @@ export const sendUsdt = async ({ address, amount, user }) => {
   const usdtRate = rates["USDT"] || rates["USD"];
   const effectiveRate = usdtRate / (1 + (config.fee as any).usdt); // fx fee baked into rate; lower than mid since user sells BTC
   const btcSats = Math.round((amount / effectiveRate) * SATS);
-  const liquidFee = Math.round(btcSats * config.fee.liquid); // covered by credits if available
 
-  const { rate, currency } = await getUserRate(user);
+  const { rate } = await getUserRate(user);
 
-  const p = await debit({
+  const p = (await debit({
     aid: uid,
     hash: address,
     amount: btcSats,
     fee: 0,
-    ourfee: liquidFee,
+    ourfee: 0,
     rate,
     user,
     type: PaymentType.liquid,
-    creditType: "usdt",
-  });
+  })) as Payment;
 
-  if (config.liquid.walletpass)
-    await lq.walletPassphrase(config.liquid.walletpass, 300);
+  if (config.liquid.walletpass) await lq.walletPassphrase(config.liquid.walletpass, 300);
 
   const txid = await lq.sendToAddress(
     address,
     amount,
-    "", "", false, false, 1, "UNSET", false,
+    "",
+    "",
+    false,
+    false,
+    1,
+    "UNSET",
+    false,
     (config.liquid as any).usdt,
   );
 
@@ -1001,7 +1005,14 @@ export const sendKeysend = async ({
   }
 };
 
-export const sendLightning = async ({ user, pr, amount, fee = undefined, memo = undefined, retryFor = 30 }) => {
+export const sendLightning = async ({
+  user,
+  pr,
+  amount,
+  fee = undefined,
+  memo = undefined,
+  retryFor = 30,
+}) => {
   let p;
 
   if (typeof amount !== "undefined") {
@@ -1047,12 +1058,15 @@ export const sendLightning = async ({ user, pr, amount, fee = undefined, memo = 
   l("paying lightning invoice", pr.substr(-8), amount, fee);
 
   try {
-    const r = await outLn.xpay({
-      invstring: pr.replace(/\s/g, "").toLowerCase(),
-      amount_msat: amount_msat ? undefined : amount * 1000,
-      maxfee: fee * 1000,
-      retry_for: retryFor,
-    }, { noFallback: retryFor < 20 });
+    const r = await outLn.xpay(
+      {
+        invstring: pr.replace(/\s/g, "").toLowerCase(),
+        amount_msat: amount_msat ? undefined : amount * 1000,
+        maxfee: fee * 1000,
+        retry_for: retryFor,
+      },
+      { noFallback: retryFor < 20 },
+    );
 
     try {
       if (r.payment_preimage || r.preimage || !r.failed_parts) p = await finalize(r, p);

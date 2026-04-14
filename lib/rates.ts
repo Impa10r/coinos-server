@@ -43,7 +43,6 @@ const connect = async () => {
   return ws;
 };
 
-
 export const getFx = async () => {
   connect();
 

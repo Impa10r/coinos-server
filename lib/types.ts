@@ -78,4 +78,6 @@ export interface Payment {
   tip?: number;
   created: number;
   user?: User;
+  assetAmount?: number;
+  assetType?: string;
 }

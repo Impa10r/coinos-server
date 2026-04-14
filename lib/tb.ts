@@ -13,7 +13,6 @@ const LEDGER_SATS = 1;
 const LEDGER_CREDIT_BTC = 2;
 const LEDGER_CREDIT_LN = 3;
 const LEDGER_CREDIT_LQ = 4;
-const LEDGER_CREDIT_USDT = 5;
 
 // Microsatoshi precision: 1 sat = 1,000,000 microsats
 const MSATS = 1_000_000n; // BigInt for TB operations
@@ -23,7 +22,6 @@ const creditLedger: Record<string, number> = {
   bitcoin: LEDGER_CREDIT_BTC,
   lightning: LEDGER_CREDIT_LN,
   liquid: LEDGER_CREDIT_LQ,
-  usdt: LEDGER_CREDIT_USDT,
 };
 
 // House account IDs match their ledger
@@ -31,13 +29,11 @@ const HOUSE_SATS = 1n;
 const HOUSE_BTC = 2n;
 const HOUSE_LN = 3n;
 const HOUSE_LQ = 4n;
-const HOUSE_USDT = 5n;
 
 const houseCreditAccount: Record<string, bigint> = {
   bitcoin: HOUSE_BTC,
   lightning: HOUSE_LN,
   liquid: HOUSE_LQ,
-  usdt: HOUSE_USDT,
 };
 
 // Convert UUID string to BigInt
@@ -96,7 +92,6 @@ export async function initTigerBeetle() {
     { id: u128(HOUSE_BTC), ledger: LEDGER_CREDIT_BTC, code: 1 },
     { id: u128(HOUSE_LN), ledger: LEDGER_CREDIT_LN, code: 1 },
     { id: u128(HOUSE_LQ), ledger: LEDGER_CREDIT_LQ, code: 1 },
-    { id: u128(HOUSE_USDT), ledger: LEDGER_CREDIT_USDT, code: 1 },
   ].map((a) => ({
     id: a.id,
     debits_pending: 0n,
@@ -157,7 +152,7 @@ export async function createBalanceAccount(aid: string) {
 }
 
 export async function createCreditAccounts(uid: string) {
-  const accounts = ["bitcoin", "lightning", "liquid", "usdt"].map((type) => ({
+  const accounts = ["bitcoin", "lightning", "liquid"].map((type) => ({
     id: u128(creditId(uid, type)),
     ledger: creditLedger[type],
     code: 1,
@@ -755,7 +750,6 @@ export async function tbMultiplyForMicrosats(uid: string): Promise<number> {
   await multiplyAccount(creditId(uid, "bitcoin"), LEDGER_CREDIT_BTC, HOUSE_BTC);
   await multiplyAccount(creditId(uid, "lightning"), LEDGER_CREDIT_LN, HOUSE_LN);
   await multiplyAccount(creditId(uid, "liquid"), LEDGER_CREDIT_LQ, HOUSE_LQ);
-  await multiplyAccount(creditId(uid, "usdt"), LEDGER_CREDIT_USDT, HOUSE_USDT);
 
   return count;
 }

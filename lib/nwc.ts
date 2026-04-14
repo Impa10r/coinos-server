@@ -7,7 +7,6 @@ import { handleZap, serverPubkey, serverPubkey2, serverSecret, serverSecret2 } f
 import { sendInternal, sendKeysend, sendLightning } from "$lib/payments";
 import { getBalance } from "$lib/tb";
 import { fail, getInvoice, sleep } from "$lib/utils";
-import rpc from "@coinos/rpc";
 import { hexToBytes } from "@noble/hashes/utils.js";
 import { Relay } from "nostr";
 import { finalizeEvent, nip04, nip44 } from "nostr-tools";
@@ -20,7 +19,6 @@ const serverKeys = {
 
 const result = (result) => ({ result });
 const error = (error) => ({ error });
-const bc = rpc(config.bitcoin);
 
 const methods = [
   "pay_keysend",
@@ -114,9 +112,21 @@ export default () => {
           warn("nwc rate limit", ev.pubkey);
           const rlPk = ev.tags.find((t) => t[0] === "p")[1];
           const rlSk = serverKeys[rlPk];
-          const payload = JSON.stringify({ result_type: "rate_limited", error: { code: "RATE_LIMITED", message: "Too many requests" } });
+          const payload = JSON.stringify({
+            result_type: "rate_limited",
+            error: { code: "RATE_LIMITED", message: "Too many requests" },
+          });
           const rlContent = await nip04.encrypt(rlSk, ev.pubkey, payload);
-          let response: UnsignedEvent = { created_at: Math.floor(Date.now() / 1000), kind: 23195, pubkey: rlPk, tags: [["p", ev.pubkey], ["e", ev.id]], content: rlContent };
+          let response: UnsignedEvent = {
+            created_at: Math.floor(Date.now() / 1000),
+            kind: 23195,
+            pubkey: rlPk,
+            tags: [
+              ["p", ev.pubkey],
+              ["e", ev.id],
+            ],
+            content: rlContent,
+          };
           response = await finalizeEvent(response, hexToBytes(rlSk));
           r.send(["EVENT", response]);
           return;
@@ -147,7 +157,14 @@ export default () => {
               decrypted = nip44.v2.decrypt(content, convKey);
               isNip44 = true;
             } catch (e44) {
-              warn("nwc decrypt failed nip04:", e04.message, "nip44:", e44.message, "content:", content.slice(0, 20));
+              warn(
+                "nwc decrypt failed nip04:",
+                e04.message,
+                "nip44:",
+                e44.message,
+                "content:",
+                content.slice(0, 20),
+              );
               throw e04;
             }
           }
@@ -173,7 +190,10 @@ export default () => {
             ? nip44.v2.encrypt(payload, convKey)
             : await nip04.encrypt(sk, pubkey, payload);
 
-          const responseTags: string[][] = [["p", pubkey], ["e", ev.id]];
+          const responseTags: string[][] = [
+            ["p", pubkey],
+            ["e", ev.id],
+          ];
           if (isNip44) responseTags.push(["encryption", "nip44_v2"]);
 
           let response: UnsignedEvent = {
@@ -196,7 +216,10 @@ export default () => {
             content = isNip44
               ? nip44.v2.encrypt(payload, nip44.v2.utils.getConversationKey(skBytes, pubkey))
               : await nip04.encrypt(sk, pubkey, payload);
-            const errTags: string[][] = [["p", pubkey], ["e", ev.id]];
+            const errTags: string[][] = [
+              ["p", pubkey],
+              ["e", ev.id],
+            ];
             if (isNip44) errTags.push(["encryption", "nip44_v2"]);
             let response: UnsignedEvent = {
               created_at: Math.floor(Date.now() / 1000),

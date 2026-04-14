@@ -23,7 +23,9 @@ export default {
     const url = c.req.query("url");
     if (!url) return bail(c, "url required");
     try {
-      const opts = proxyAgent ? { agent: { http: proxyAgent, https: proxyAgent } } : {};
+      const opts = proxyAgent
+        ? { agent: { http: proxyAgent as any, https: proxyAgent as any } }
+        : {};
       const r = await got(url, opts).json();
       return c.json(r);
     } catch (e) {

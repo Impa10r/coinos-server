@@ -38,7 +38,9 @@ export async function handleZap(invoice, sender = undefined) {
   try {
     const pubkey = serverPubkey2;
     let desc = invoice.description;
-    try { desc = decodeURIComponent(desc); } catch {}
+    try {
+      desc = decodeURIComponent(desc);
+    } catch {}
     const zapreq = JSON.parse(desc);
 
     if (!zapreq.tags || zapreq.tags.length === 0) {
