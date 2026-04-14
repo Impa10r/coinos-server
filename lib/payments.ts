@@ -403,6 +403,9 @@ export const credit = async ({
     inv.settled = Date.now();
   }
 
+  if (assetType !== undefined) inv.assetType = assetType;
+  if (assetAmount !== undefined) inv.assetAmount = assetAmount;
+
   let balanceKey = "balance";
   if ([PaymentType.bitcoin, PaymentType.liquid].includes(type)) {
     const [txid, vout] = ref.split(":").slice(-2);
@@ -867,6 +870,8 @@ export const sendOnchain = async (params) => {
 
     const amount = total - change;
 
+    if (type === PaymentType.liquid) fee = 50;
+
     // When hex is pre-built, check if the fee rate is still acceptable
     if (isBitcoin && !buildResult) {
       const currentFees: any = await fetch(api.fees).then((r) => r.json());
@@ -931,11 +936,13 @@ export const sendUsdt = async ({ address, amount, user }) => {
 
   const { rate } = await getUserRate(user);
 
+  const LIQUID_NETWORK_FEE = 50;
+
   const p = (await debit({
     aid: uid,
     hash: address,
-    amount: btcSats,
-    fee: 0,
+    amount: btcSats + LIQUID_NETWORK_FEE,
+    fee: LIQUID_NETWORK_FEE,
     ourfee: 0,
     rate,
     user,
@@ -1288,6 +1295,8 @@ export const build = async ({ aid, amount, address, feeRate, subtract, user }) =
   let fee = 0;
   let tx;
 
+  const LIQUID_NETWORK_FEE = 50;
+
   try {
     tx = await node.fundRawTransaction(raw, {
       fee_rate: feeRate,
@@ -1295,7 +1304,7 @@ export const build = async ({ aid, amount, address, feeRate, subtract, user }) =
       subtractFeeFromOutputs: [],
     });
 
-    fee = sats(tx.fee);
+    fee = isBitcoin ? sats(tx.fee) : LIQUID_NETWORK_FEE;
   } catch (e) {
     if (e.message.startsWith("Insufficient")) subtract = true;
     else throw e;
@@ -1327,7 +1336,7 @@ export const build = async ({ aid, amount, address, feeRate, subtract, user }) =
       subtractFeeFromOutputs: [0],
     });
 
-    fee = sats(tx.fee);
+    fee = isBitcoin ? sats(tx.fee) : LIQUID_NETWORK_FEE;
   }
 
   const inputs = [];
