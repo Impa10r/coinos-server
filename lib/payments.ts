@@ -930,7 +930,7 @@ export const sendOnchain = async (params) => {
 export const sendUsdt = async ({ address, amount, user }) => {
   const { id: uid } = user;
   const rates = await g("rates");
-  const usdtRate = rates["USDT"] || rates["USD"];
+  const usdtRate = rates["USD"];
   const effectiveRate = usdtRate / (1 + (config.fee as any).usdt); // fx fee baked into rate; lower than mid since user sells BTC
   const btcSats = Math.round((amount / effectiveRate) * SATS);
 

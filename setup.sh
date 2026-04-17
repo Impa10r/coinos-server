@@ -27,8 +27,12 @@ curl -X POST http://localhost:7071/v1/admin/wallet/unlock \
   
 docker-compose build --no-cache app
 docker compose up -d
-docker run -it -v $(pwd):/home/bun/app --entrypoint bun asoltys/coinos-server i
-docker exec -it bc bitcoin-cli createwallet coinos
-docker exec -it bc bitcoin-cli rescanblockchain
-docker exec -it bc bitcoin-cli generatetoaddress 500 $(docker exec -it bc bitcoin-cli getnewaddress "" "p2sh-segwit")
-docker exec -it lq elements-cli createwallet coinos
+docker run -v $(pwd):/home/bun/app --entrypoint bun asoltys/coinos-server i
+docker exec bc bitcoin-cli createwallet coinos
+docker exec bc bitcoin-cli rescanblockchain
+docker exec bc bitcoin-cli generatetoaddress 500 $(docker exec bc bitcoin-cli getnewaddress "" "p2sh-segwit")
+docker exec lq elements-cli createwallet coinos
+docker exec lq elements-cli rescanblockchain
+docker exec lq elements-cli generatetoaddress 500 $(docker exec lq elements-cli getnewaddress)
+# usdt
+docker exec lq elements-cli -rpcwallet=coinos issueasset 1000000 0 false

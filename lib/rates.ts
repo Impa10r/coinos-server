@@ -25,8 +25,6 @@ const connect = async () => {
         rates[symbol] = msg.c * fx[symbol];
       });
 
-      rates["USDT"] = rates["USD"];
-
       rate = msg.c;
       s("rate", rate);
       s("rates", rates);

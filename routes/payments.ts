@@ -595,8 +595,29 @@ export default {
 
           if (isUsdt) {
             const rates = await g("rates");
-            const usdtRate = rates["USDT"] || rates["USD"];
-            const effectiveRate = usdtRate * (1 + (config.fee as any).usdt); // higher than mid: user gets fewer sats per USDT
+            let walkRate = 0;
+            try {
+              const book = await got(
+                "https://api-pub.bitfinex.com/v2/book/tBTCUST/P0?len=25",
+              ).json() as [number, number, number][];
+              const asks = book
+                .filter(([, , a]) => a < 0)
+                .map(([p, , a]) => [p, Math.abs(a)] as [number, number])
+                .sort((a, b) => a[0] - b[0]); // ascending: cheapest asks first
+              let usdtFilled = 0;
+              let btcTotal = 0;
+              for (const [price, btcSize] of asks) {
+                const usdtTake = Math.min(price * btcSize, amount - usdtFilled);
+                btcTotal += usdtTake / price;
+                usdtFilled += usdtTake;
+                if (usdtFilled >= amount) break;
+              }
+              if (btcTotal > 0) walkRate = usdtFilled / btcTotal;
+            } catch (e) {
+              err("bitfinex book error", e.message);
+            }
+            const usdtRate = walkRate || rates["USD"];
+            const effectiveRate = usdtRate * (1 + (config.fee as any).usdt);
             creditAmount = Math.round((amount / effectiveRate) * SATS);
             extraFields = {
               assetAmount: amount,
