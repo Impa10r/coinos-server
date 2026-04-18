@@ -24,6 +24,7 @@ import { sendHeartbeat, websocket } from "$lib/sockets";
 import { initTigerBeetle } from "$lib/tb";
 import { startZmq } from "$lib/zmq";
 import { listenForDMs, syncGroupsAndSave } from "$lib/dmNotifications";
+import { announceFips } from "$lib/fips";
 import { initMlsIndex } from "$lib/mls";
 
 import ecash from "$routes/ecash";
@@ -64,6 +65,8 @@ setTimeout(listenForLightning, 2000);
 setInterval(ensureListenerAlive, 120000);
 listenForDMs();
 initMlsIndex();
+announceFips();
+setInterval(announceFips, 3600 * 1000);
 setInterval(sendHeartbeat, 2000);
 
 app.get("/balances", info.balances);
