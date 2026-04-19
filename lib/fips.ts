@@ -36,13 +36,17 @@ export const announceFips = async () => {
     const npub = nip19.npubEncode(pubkey);
     l(`announcing FIPS overlay as ${npub}`);
 
-    try {
-      const r = await Relay.connect(config.publicRelay);
-      await r.publish(ev);
-      setTimeout(() => r.close(), 1000);
-    } catch (e: any) {
-      warn(`fips announce failed on ${config.publicRelay}`, e.message);
-    }
+    await Promise.all(
+      config.relays.map(async (url) => {
+        try {
+          const r = await Relay.connect(url);
+          await r.publish(ev);
+          setTimeout(() => r.close(), 1000);
+        } catch (e: any) {
+          warn(`fips announce failed on ${url}`, e.message);
+        }
+      }),
+    );
   } catch (e: any) {
     warn("fips announce error", e.message);
   }
