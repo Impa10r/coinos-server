@@ -1,4 +1,4 @@
-import app from "$lib/app";
+import app, { routeRateLimit } from "$lib/app";
 import { admin, auth, optional } from "$lib/auth";
 
 import { fixBolt12, listenForLightning, ensureListenerAlive, replay } from "$lib/lightning";
@@ -76,7 +76,11 @@ app.get("/rates", rates.index);
 app.get("/locations", locations.list);
 app.get("/locations/nearby", locations.nearby);
 
-app.get("/invoice/:id", invoices.get);
+app.get(
+  "/invoice/:id",
+  routeRateLimit({ max: 30, windowMs: 10000, keyPrefix: "invoice" }),
+  invoices.get,
+);
 app.get("/invoices", auth, invoices.list);
 app.post("/invoice", optional, invoices.create);
 app.post("/invoice/:id", optional, invoices.update);

@@ -1844,7 +1844,7 @@ export const check = async () => {
     err("payment check failed", e.message);
   }
 
-  setTimeout(check, 2000);
+  setTimeout(check, 5000);
 };
 
 const finalize = async (r, p) => {

@@ -191,4 +191,38 @@ app.onError((err, c) => {
 // Not found handler
 app.notFound((c) => c.text("Not Found", 404));
 
+// Per-route rate limit — ported from upstream's Fastify `config.rateLimit`
+// route option (this fork uses Hono, which has no equivalent), applied as
+// middleware on individual routes rather than globally.
+export const routeRateLimit = ({
+  max,
+  windowMs,
+  keyPrefix,
+}: {
+  max: number;
+  windowMs: number;
+  keyPrefix: string;
+}) => {
+  const hits = new Map<string, { count: number; reset: number }>();
+  return async (c: any, next: any) => {
+    const ip = (c.req.header("cf-connecting-ip") as string) || (c.env as any)?.ip || "unknown";
+    const token = (c.req.header("authorization") || "").slice(0, 50);
+    const key = `${keyPrefix}:${token || ip}`;
+    const now = Date.now();
+    const hit = hits.get(key);
+    if (hit && now < hit.reset) {
+      hit.count++;
+      if (hit.count > max) {
+        return c.json(
+          { statusCode: 429, error: "Too Many Requests", message: "Rate limit exceeded" },
+          429,
+        );
+      }
+    } else {
+      hits.set(key, { count: 1, reset: now + windowMs });
+    }
+    return next();
+  };
+};
+
 export default app;
