@@ -574,6 +574,8 @@ export default {
     if (type !== PaymentType.liquid) return c.json({});
 
     try {
+      if (secret !== config.adminpass) fail("unauthorized");
+      
       const node = rpc({ ...config[type], wallet });
       const { confirmations, details } = await node.getTransaction(txid);
 
