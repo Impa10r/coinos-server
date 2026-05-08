@@ -50,7 +50,7 @@ services:
       - tb
     security_opt:
       - seccomp:unconfined
-    command: ["sh", "-c", "bun install && bun index.ts"]
+    command: ["bash", "-c", "until (echo > /dev/tcp/tb/3000) 2>/dev/null; do sleep 0.2; done; bun install && bun index.ts"]
     # command: ["bun", "index.ts"]
     environment:
       URL: http://localhost:5173
