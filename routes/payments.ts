@@ -953,4 +953,14 @@ export default {
       return bail(c, e.message);
     }
   },
+
+  async btcHotBalance(c) {
+    try {
+      const bc = rpc(config.bitcoin);
+      const amount = sats(await bc.getBalance());
+      return c.json({ amount });
+    } catch (e) {
+      return bail(c, e.message);
+    }
+  },
 };
