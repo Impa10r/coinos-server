@@ -379,7 +379,6 @@ export default {
       const attributes = [
         "about",
         "accountIndex",
-        "arkAddress",
         "autowithdraw",
         "banner",
         "bip353",
@@ -426,8 +425,6 @@ export default {
 
       user.fresh = false;
       user.tip = Math.max(0, Math.min(1000, Number.parseInt(user.tip)));
-
-      console.log("ARK ADDR", user.arkAddress);
 
       if (password && password === confirm) {
         user.password = await Bun.password.hash(password, {
@@ -1012,7 +1009,7 @@ export default {
           await importAccountHistory(account);
         }
 
-        if (account.type === PaymentType.ark || (account.pubkey && account.fingerprint)) {
+        if (account.pubkey && account.fingerprint) {
           const paymentIds = (await db.lRange(`${aid}:payments`, 0, -1)) as string[];
           const paymentKeys = paymentIds.map((pid) => `payment:${pid}`);
           const payments = await gfAll(paymentKeys);
@@ -1042,7 +1039,7 @@ export default {
   async createAccount(c) {
     try {
       const body = await c.req.json();
-      const { fingerprint, pubkey, name, seed, type, arkAddress, accountIndex } = body;
+      const { fingerprint, pubkey, name, seed, type, accountIndex } = body;
       const user = c.get("user");
       const { id: uid } = user;
 
@@ -1057,7 +1054,6 @@ export default {
         fingerprint,
         descriptors: [] as any[],
         nextIndex: 0,
-        arkAddress,
         accountIndex,
         importedAt: undefined,
       };
@@ -1072,24 +1068,6 @@ export default {
             return bail(c, "A vault with this key already exists");
           }
         }
-      }
-
-      if (type === "ark") {
-        const accountIds = await db.lRange(`${user.id}:accounts`, 0, -1);
-        for (const accId of accountIds) {
-          const acc = await g(`account:${accId}`);
-          if (acc?.type === "ark") {
-            return bail(c, "You already have an Ark vault");
-          }
-        }
-        const m = db
-          .multi()
-          .set(`account:${id}`, JSON.stringify(account))
-          .lPush(`${user.id}:accounts`, id);
-        if (arkAddress) m.set(`arkaddr:${arkAddress}`, JSON.stringify({ aid: id, uid }));
-        await m.exec();
-
-        return c.json(account);
       }
 
       let node = rpc(config[type]);
@@ -1196,20 +1174,17 @@ export default {
         fail("account not found");
       }
 
-      if (account.type !== "ark") {
-        try {
-          const node = rpc({ ...config[account.type], wallet: id });
-          await node.unloadWallet(id);
-        } catch {
-          warn("failed to unload wallet", id);
-        }
+      try {
+        const node = rpc({ ...config[account.type], wallet: id });
+        await node.unloadWallet(id);
+      } catch {
+        warn("failed to unload wallet", id);
       }
 
       const m = db.multi();
       if (keyType === "list") m.lRem(`${uid}:accounts`, 1, id);
       else if (keyType === "set") m.sRem(`${uid}:accounts`, id);
       m.del(`account:${id}`).del(`${id}:payments`);
-      if (account.arkAddress) m.del(`arkaddr:${account.arkAddress}`);
       await m.exec();
 
       return c.json({ ok: true });

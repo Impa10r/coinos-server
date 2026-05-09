@@ -3,7 +3,6 @@ export default [
   "accountIndex",
   "admin",
   "anon",
-  "arkAddress",
   "autowithdraw",
   "balance",
   "banner",

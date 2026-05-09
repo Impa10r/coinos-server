@@ -69,27 +69,7 @@ export const generate = async ({ invoice, user }) => {
   let path;
   let paymentHash;
 
-  if (type === PaymentType.ark && account.type !== "ark") {
-    // Custodial account receiving via Ark: use vault's ark address
-    const accounts = await db.lRange(`${user.id}:accounts`, 0, -1);
-    let vaultAddress;
-    for (const accId of accounts) {
-      const acc = await g(`account:${accId}`);
-      if (acc?.type === "ark" && acc.arkAddress) {
-        vaultAddress = acc.arkAddress;
-        break;
-      }
-    }
-    if (!vaultAddress) fail("No ark vault found");
-    text = vaultAddress;
-    hash = id;
-    await s(`custodial-ark-invoice:${vaultAddress}`, id);
-  } else if (account.type === "ark") {
-    type = PaymentType.ark;
-    text = account.arkAddress;
-    hash = id;
-    await db.del(`custodial-ark-invoice:${account.arkAddress}`);
-  } else if (account.seed || (account.pubkey && account.fingerprint)) {
+  if (account.seed || (account.pubkey && account.fingerprint)) {
     type = PaymentType.bitcoin;
     const nextIndex = account.nextIndex || 0;
     const { address, path: hdpath } = deriveAddress(account.pubkey, account.fingerprint, nextIndex);
@@ -161,8 +141,6 @@ export const generate = async ({ invoice, user }) => {
   } else if (type === PaymentType.ecash) {
     hash = id;
     text = request(id, amount, memo);
-  } else if (type === PaymentType.ark) {
-    hash = id;
   } else {
     fail(`unrecognized type ${type}`);
   }

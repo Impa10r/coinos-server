@@ -1,9 +1,5 @@
-import config from "$config";
 import app from "$lib/app";
-import { sendArk } from "$lib/ark";
 import { admin, auth, optional } from "$lib/auth";
-import { getDelegateInfo, receiveDelegation } from "$lib/delegator";
-import { g, s } from "$lib/db";
 
 import { fixBolt12, listenForLightning, ensureListenerAlive, replay } from "$lib/lightning";
 import { l } from "$lib/logging";
@@ -132,29 +128,7 @@ app.post("/gateway", payments.gateway);
 app.post("/bump", auth, payments.bump);
 app.get("/decode/:bolt11", payments.decode);
 app.post("/fetchinvoice", payments.fetchinvoice);
-app.get("/ark/address", payments.arkAddress);
-app.post("/ark/receive", auth, payments.arkReceive);
-app.post("/ark/sync", auth, payments.arkSync);
 app.post("/bitcoin/sync", auth, payments.bitcoinSync);
-
-app.get("/v1/delegator/info", async (c) => {
-  try {
-    const info = await getDelegateInfo();
-    return c.json(info);
-  } catch (e: any) {
-    return c.json(e.message, 500);
-  }
-});
-
-app.post("/v1/delegate", async (c) => {
-  try {
-    const body = await c.req.json();
-    await receiveDelegation(body);
-    return c.json({ ok: true });
-  } catch (e: any) {
-    return c.json(e.message, 500);
-  }
-});
 
 app.get("/square/connect", auth, square.connect);
 app.get("/square/auth", auth, square.auth);
@@ -179,10 +153,6 @@ app.post("/bitcoin/fee", auth, payments.fee);
 app.post("/bitcoin/send", auth, payments.send);
 app.post("/liquid/usdt/send", auth, payments.sendUsdt);
 app.get("/liquid/usdt/balance", auth, payments.usdtBalance);
-app.post("/ark/send", auth, payments.ark);
-app.post("/ark/vault-send", auth, payments.arkVaultSend);
-app.post("/ark/vault-receive", auth, payments.arkVaultReceive);
-
 app.post("/account/delete", auth, users.deleteAccount);
 app.post("/user/delete", auth, users.deleteUser);
 app.get("/account/:id", auth, users.account);
@@ -276,30 +246,6 @@ app.post("/echo", async (c) => {
   const body = await c.req.json();
   console.log("echo", body);
   return c.json(body);
-});
-
-app.post("/test/ark/send", async (c) => {
-  try {
-    const secret = c.req.header("x-test-secret");
-    if (!config.testSecret || secret !== config.testSecret) {
-      return c.json("Forbidden", 403);
-    }
-    const body = await c.req.json();
-    const { address, amount, iid } = body;
-    const txid = await sendArk(address, amount);
-
-    if (iid) {
-      const invoice = await g(`invoice:${iid}`);
-      if (invoice) {
-        invoice.received = (invoice.received || 0) + amount;
-        await s(`invoice:${iid}`, invoice);
-      }
-    }
-
-    return c.json({ txid, iid });
-  } catch (e: any) {
-    return c.json(e.message, 500);
-  }
 });
 
 const host_: string = process.env["HOST"] || "0.0.0.0";

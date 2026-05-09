@@ -136,7 +136,7 @@ export default () => {
 
         db.zAdd(handledKey, { score: now, value: ev.id });
         db.zRemRangeByScore(handledKey, 0, now - nwcEventMaxAgeSeconds);
-        const size = await db.zCard(handledKey);
+        const size = Number(await db.zCard(handledKey));
         if (size > handledMaxSize) {
           await db.zRemRangeByRank(handledKey, 0, size - handledMaxSize - 1);
         }

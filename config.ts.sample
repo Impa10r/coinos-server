@@ -1,13 +1,6 @@
 import { SquareEnvironment } from "square";
 
 export default {
-  ark: {
-    network: "regtest",
-    esploraUrl: "http://cs:3000",
-    arkServerUrl: "http://arkd:7070",
-    arkServerPublicKey: "",
-    arkPrivateKey: "",
-  },
   archive: "redis://arc:6380",
   db: "redis://db",
   nostr: "wss://relay.coinos.io",

@@ -3,7 +3,6 @@ export interface User {
   accountIndex: string;
   admin: string;
   anon: string;
-  arkAddress: string;
   autowithdraw: string;
   balance: string;
   banner: string;

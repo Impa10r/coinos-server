@@ -1,7 +1,6 @@
 import net from "node:net";
 import config from "$config";
 import { btcNetwork } from "$lib/esplora";
-import { refreshArkWallet } from "$lib/ark";
 import { err, l, warn } from "$lib/logging";
 import { checkOutgoingConfirmations, processWatchedTx } from "$lib/payments";
 import { Transaction } from "@scure/btc-signer";
@@ -117,7 +116,6 @@ const handleRawBlock = async (raw: Uint8Array) => {
   }
 
   checkOutgoingConfirmations().catch((e) => warn("block confirmation check failed", e.message));
-  refreshArkWallet().catch(() => {});
 };
 
 // ZMTP 3.0 NULL protocol

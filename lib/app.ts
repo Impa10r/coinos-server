@@ -5,8 +5,8 @@ import { pino } from "pino";
 
 const app = new Hono();
 
-const reqLogger = pino(pino.destination("req"));
-const resLogger = pino(pino.destination("res"));
+const reqLogger = pino((pino as any).destination("req"));
+const resLogger = pino((pino as any).destination("res"));
 
 // CORS
 app.use(

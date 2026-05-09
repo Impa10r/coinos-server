@@ -101,7 +101,6 @@ import {
   sleep,
   t,
 } from "$lib/utils";
-import { getArkBalance, sendArk } from "$lib/ark";
 import { callWebhook } from "$lib/webhooks";
 import rpc from "@coinos/rpc";
 import { selectUTXO, p2wpkh } from "@scure/btc-signer";
@@ -137,65 +136,6 @@ export const getUserRate = async (user) => {
   const { currency } = user;
   const rate = rates[currency];
   return { rates, rate, currency };
-};
-
-export const acquireArkLock = async (hash) => {
-  const locked = await db.set(`arklock:${hash}`, "1", { NX: true });
-  if (!locked) fail("Already processed");
-};
-
-export const requireAccountOwnership = async (uid: string, aid: string) => {
-  if (!aid) fail("Missing account id");
-  const pos = await db.lPos(`${uid}:accounts`, aid);
-  if (pos === null) fail("Unauthorized");
-};
-
-export const createArkPayment = async ({
-  aid,
-  uid,
-  amount,
-  hash,
-  rate,
-  currency,
-  type = PaymentType.ark,
-  iid = undefined,
-  created = Date.now(),
-  mapHashToId = false,
-  extraHashMappings = [] as string[],
-  extraMultiOps = undefined as ((m: any, p: any) => void) | undefined,
-}) => {
-  const p = {
-    id: v4(),
-    aid,
-    amount,
-    hash,
-    confirmed: true,
-    rate,
-    currency,
-    type,
-    uid,
-    iid,
-    created,
-  };
-
-  const m = db.multi();
-  m.set(`payment:${p.id}`, JSON.stringify(p))
-    .lPush(`${aid}:payments`, p.id)
-    .set(`${aid}:payments:last`, p.created);
-
-  if (mapHashToId) {
-    m.set(`payment:${aid}:${hash}`, JSON.stringify(p.id));
-  }
-
-  for (const h of extraHashMappings) {
-    m.set(`payment:${aid}:${h}`, JSON.stringify(p.id));
-  }
-
-  if (extraMultiOps) extraMultiOps(m, p);
-
-  await m.exec();
-
-  return p;
 };
 
 export const debit = async ({
@@ -607,54 +547,6 @@ const pay = async ({ aid = undefined, amount, to, user }) => {
       recipient,
       sender: user,
     });
-
-  if (to.startsWith("ark") || to.startsWith("tark")) {
-    const tmpHash = v4();
-    const p = await debit({
-      hash: tmpHash,
-      amount,
-      user,
-      type: PaymentType.ark,
-    });
-
-    try {
-      const txid = await sendArk(to, amount);
-      p.hash = txid;
-      await s(`payment:${p.id}`, p);
-      await s(`payment:${txid}`, p.id);
-
-      // Instant vault notification
-      try {
-        const vaultInfo = await g(`arkaddr:${to}`);
-        if (vaultInfo) {
-          const { aid: vaultAid, uid: vaultUid } = vaultInfo;
-          const isForward = await g(`custodial-ark-invoice:${to}`);
-          const vaultOwner = await g(`user:${vaultUid}`);
-          const { rate, currency } = await getUserRate(vaultOwner || user);
-          const vp = await createArkPayment({
-            aid: vaultAid,
-            uid: vaultUid,
-            amount,
-            hash: txid,
-            rate,
-            currency,
-            extraHashMappings: [txid],
-          });
-          if (!isForward) {
-            l("ark pay: instant vault credit", vaultAid, txid);
-            emit(vaultUid, "payment", vp);
-          }
-        }
-      } catch (e) {
-        warn("ark pay: instant vault notification failed", e.message);
-      }
-    } catch (e) {
-      await reverse(p);
-      throw e;
-    }
-
-    return p;
-  }
 
   // Check for local invoice before applying external fees
   if (to.startsWith("ln") && !to.startsWith("lnurl") && !to.startsWith("lno")) {
@@ -1077,6 +969,8 @@ export const sendLightning = async ({
 
   l("paying lightning invoice", pr.substr(-8), amount, fee);
 
+  const whitelisted = await db.sIsMember("whitelist", user?.username?.toLowerCase().trim());
+
   try {
     const r = await outLn.xpay(
       {
@@ -1085,7 +979,7 @@ export const sendLightning = async ({
         maxfee: fee * 1000,
         retry_for: retryFor,
       },
-      { noFallback: retryFor < 20 },
+      { noFallback: !whitelisted || retryFor < 20 },
     );
 
     try {
@@ -1797,13 +1691,6 @@ const freezeCheck = async () => {
     await s("bolt12:limit", Math.max(lnbalance - lnthreshold, 0));
   } catch (e: any) {
     warn("freezeCheck failed:", e.message);
-  }
-
-  const arkBalance = getArkBalance();
-  if (arkBalance) {
-    const arkthreshold = (await g("ark:threshold")) || 0;
-    await s("ark:available", arkBalance.available);
-    await s("ark:limit", Math.max(arkBalance.available - arkthreshold, 0));
   }
 
   setTimeout(freezeCheck, 10000);

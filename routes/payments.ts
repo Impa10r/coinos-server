@@ -1,6 +1,5 @@
 import config from "$config";
 import api from "$lib/api";
-import { getArkAddress, sendArk, verifyArkVtxo } from "$lib/ark";
 import { requirePin } from "$lib/auth";
 import { archive, db, g, gf, gfAll, s } from "$lib/db";
 import { getTx } from "$lib/esplora";
@@ -10,16 +9,11 @@ import ln from "$lib/ln";
 import { err, l, warn } from "$lib/logging";
 import mqtt from "$lib/mqtt";
 import {
-  acquireArkLock,
-  requireAccountOwnership,
   build,
   completePayment,
-  createArkPayment,
   credit,
   debit,
-  getUserRate,
   processWatchedTx,
-  reverse,
   sendInternal,
   sendLightning,
   sendOnchain,
@@ -32,7 +26,6 @@ import {
   getCredit,
   getFundBalance,
   tbConfirm,
-  tbCredit,
   tbDebit,
   tbFundCredit,
   tbFundDebit,
@@ -81,71 +74,21 @@ export default {
 
       if (!p) {
         if (hash) {
-          if (invoice?.type === PaymentType.ark) {
-            if (!amount) ({ amount } = invoice);
-            if (!invoice.text) fail("Missing ark address");
-            const tmpHash = v4();
-            p = await debit({
-              hash: tmpHash,
+          const recipientAccount = invoice?.aid ? await g(`account:${invoice.aid}`) : null;
+          if (recipientAccount?.pubkey || recipientAccount?.seed) {
+            p = await sendOnchain({
+              amount: amount || invoice.amount,
+              address: invoice.hash,
+              user,
+            });
+          } else {
+            p = await sendInternal({
+              invoice,
               amount,
               memo,
-              user,
-              type: PaymentType.ark,
-              aid,
+              recipient,
+              sender: user,
             });
-            try {
-              const txid = await sendArk(invoice.text, amount);
-              p.hash = txid;
-              await s(`payment:${p.id}`, p);
-              await s(`payment:${txid}`, p.id);
-
-              try {
-                const vaultInfo = await g(`arkaddr:${invoice.text}`);
-                if (vaultInfo) {
-                  const { aid: vaultAid, uid: vaultUid } = vaultInfo;
-                  const isForward = await g(`custodial-ark-invoice:${invoice.text}`);
-                  const vaultOwner = await g(`user:${vaultUid}`);
-                  const { rate: vRate, currency: vCurrency } = await getUserRate(
-                    vaultOwner || user,
-                  );
-                  const vp = await createArkPayment({
-                    aid: vaultAid,
-                    uid: vaultUid,
-                    amount,
-                    hash: txid,
-                    rate: vRate,
-                    currency: vCurrency,
-                    extraHashMappings: [txid],
-                  });
-                  if (!isForward) {
-                    l("ark invoice: instant vault credit", vaultAid, txid);
-                    emit(vaultUid, "payment", vp);
-                  }
-                }
-              } catch (e) {
-                warn("ark invoice: instant vault notification failed", e.message);
-              }
-            } catch (e) {
-              await reverse(p);
-              throw e;
-            }
-          } else {
-            const recipientAccount = invoice?.aid ? await g(`account:${invoice.aid}`) : null;
-            if (recipientAccount?.pubkey || recipientAccount?.seed) {
-              p = await sendOnchain({
-                amount: amount || invoice.amount,
-                address: invoice.hash,
-                user,
-              });
-            } else {
-              p = await sendInternal({
-                invoice,
-                amount,
-                memo,
-                recipient,
-                sender: user,
-              });
-            }
           }
         } else if (fund) {
           p = await debit({
@@ -915,334 +858,6 @@ export default {
       const p = await replay(pay_index);
 
       return c.json(p);
-    } catch (e) {
-      return bail(c, e.message);
-    }
-  },
-
-  async ark(c) {
-    const body = await c.req.json();
-    const user = c.get("user");
-    const { address, amount, aid } = body;
-
-    try {
-      await requirePin({ body, user });
-
-      l("ark send", user.username, address, amount);
-      const tmpHash = v4();
-      const p = await debit({
-        hash: tmpHash,
-        amount,
-        user,
-        type: PaymentType.ark,
-        aid,
-      });
-
-      try {
-        const txid = await sendArk(address, amount);
-        l("ark send complete", txid);
-        p.hash = txid;
-        await s(`payment:${p.id}`, p);
-        await s(`payment:${txid}`, p.id);
-
-        try {
-          const vaultInfo = await g(`arkaddr:${address}`);
-          if (vaultInfo) {
-            const { aid: vaultAid, uid: vaultUid } = vaultInfo;
-
-            const isForward = await g(`custodial-ark-invoice:${address}`);
-
-            const vaultOwner = await g(`user:${vaultUid}`);
-            const { rate, currency } = await getUserRate(vaultOwner || user);
-            const vp = await createArkPayment({
-              aid: vaultAid,
-              uid: vaultUid,
-              amount: parseInt(amount),
-              hash: txid,
-              rate,
-              currency,
-              extraHashMappings: [txid],
-            });
-            if (!isForward) {
-              l("ark send: instant vault credit", vaultAid, txid);
-              emit(vaultUid, "payment", vp);
-            }
-          }
-        } catch (e) {
-          warn("ark send: instant vault notification failed", e.message);
-        }
-      } catch (e) {
-        await reverse(p);
-        throw e;
-      }
-
-      return c.json(p);
-    } catch (e) {
-      warn(user.username, "ark payment failed", e.message);
-      return c.json(e.message, 500);
-    }
-  },
-
-  async arkVaultSend(c) {
-    try {
-      const body = await c.req.json();
-      const user = c.get("user");
-      const { hash, amount, aid } = body;
-      const { rate, currency } = await getUserRate(user);
-
-      const p = await createArkPayment({
-        aid,
-        uid: user.id,
-        amount: -amount,
-        hash,
-        rate,
-        currency,
-        mapHashToId: true,
-      });
-
-      return c.json(p);
-    } catch (e) {
-      return bail(c, e.message);
-    }
-  },
-
-  async arkVaultReceive(c) {
-    try {
-      const body = await c.req.json();
-      const user = c.get("user");
-      const hash = body.hash || body.arkTxid;
-      const { aid } = body;
-      await requireAccountOwnership(user.id, aid);
-
-      if (!hash) fail("Missing transaction hash");
-      await acquireArkLock(hash);
-
-      const { found, amount: verifiedAmount } = await verifyArkVtxo(hash);
-      if (!found) fail("VTXO not found");
-      if (verifiedAmount <= 0) fail("Invalid VTXO amount");
-
-      const { rate, currency } = await getUserRate(user);
-
-      const p = await createArkPayment({
-        aid,
-        uid: user.id,
-        amount: verifiedAmount,
-        hash,
-        rate,
-        currency,
-      });
-
-      return c.json(p);
-    } catch (e) {
-      return bail(c, e.message);
-    }
-  },
-
-  async arkAddress(c) {
-    return c.json(await getArkAddress());
-  },
-
-  async arkReceive(c) {
-    try {
-      const body = await c.req.json();
-      const user = c.get("user");
-      const hash = body.hash || body.arkTxid;
-      const { iid } = body;
-      const { id: uid } = user;
-
-      if (!hash) fail("Missing transaction hash");
-
-      const invoice = await getInvoice(iid);
-      if (invoice.uid !== user?.id) fail("Unauthorized");
-
-      let { aid, type, currency } = invoice;
-
-      await acquireArkLock(hash);
-
-      const { found, amount: verifiedAmount } = await verifyArkVtxo(hash);
-      if (!found) fail("VTXO not found in server wallet");
-      if (verifiedAmount <= 0) fail("Invalid VTXO amount");
-
-      invoice.received += verifiedAmount;
-      const { rates } = await getUserRate(user);
-      const rate = rates[currency];
-
-      await tbCredit(uid, uid, type, verifiedAmount, false);
-
-      const p = await createArkPayment({
-        aid: uid,
-        uid,
-        amount: verifiedAmount,
-        hash,
-        rate,
-        currency,
-        type,
-        iid,
-        extraMultiOps: (m, p) => {
-          m.set(`invoice:${invoice.id}`, JSON.stringify(invoice));
-          m.set(`payment:${aid}:${hash}`, p.id);
-        },
-      });
-
-      await completePayment(invoice, p, user);
-
-      if (invoice.text) await db.del(`custodial-ark-invoice:${invoice.text}`);
-
-      return c.json(p);
-    } catch (e) {
-      return bail(c, e.message);
-    }
-  },
-
-  async arkSync(c) {
-    try {
-      const user = c.get("user");
-      const body = await c.req.json();
-      const { transactions = [], aid } = body;
-      const { id: uid } = user;
-      // verbose arkSync logging removed to reduce noise
-
-      const lockKey = `arksynclock:${aid}`;
-      const gotLock = await db.set(lockKey, "1", { NX: true, EX: 30 });
-      if (!gotLock) return c.json({ synced: 0, received: 0, payments: [] });
-
-      try {
-        // Sync ark address if client reports a different one
-        if (body.arkAddress) {
-          const account = await g(`account:${aid}`);
-          if (account && account.arkAddress !== body.arkAddress) {
-            if (account.arkAddress) await db.del(`arkaddr:${account.arkAddress}`);
-            account.arkAddress = body.arkAddress;
-            await s(`account:${aid}`, account);
-            await db.set(`arkaddr:${body.arkAddress}`, JSON.stringify({ aid, uid }));
-            // arkSync updated arkAddress silently
-          }
-        }
-
-        const { rate, currency } = await getUserRate(user);
-
-        let synced = 0;
-        let received = 0;
-        const payments = [];
-
-        for (const tx of transactions) {
-          const hashes = [tx.arkTxid, tx.commitmentTxid, tx.hash].filter(Boolean);
-          if (!hashes.length) continue;
-
-          let found = false;
-          for (const h of hashes) {
-            const existingId = await g(`payment:${aid}:${h}`);
-            if (existingId) {
-              const existing = await g(`payment:${existingId}`);
-              if (existing && !existing.confirmed && tx.settled) {
-                existing.confirmed = true;
-                await s(`payment:${existingId}`, existing);
-              }
-              found = true;
-              break;
-            }
-          }
-          if (found) continue;
-
-          if (tx.amount <= 0) continue;
-
-          const primaryHash = hashes[0];
-
-          const locked = await db.set(`arklock:${primaryHash}`, "1", { NX: true });
-          if (!locked) continue;
-
-          const { found: vtxoFound, amount: verifiedAmount } = await verifyArkVtxo(primaryHash);
-          if (!vtxoFound || verifiedAmount <= 0) continue;
-
-          const p = await createArkPayment({
-            aid,
-            uid,
-            amount: verifiedAmount,
-            hash: primaryHash,
-            rate,
-            currency,
-            created: tx.createdAt,
-            extraHashMappings: hashes,
-          });
-
-          payments.push(p);
-          synced++;
-          if (verifiedAmount > 0) {
-            received += verifiedAmount;
-
-            const invoiceIds = await db.lRange(`${aid}:invoices`, 0, 20);
-            for (const iid of invoiceIds) {
-              const inv = await getInvoice(iid);
-              if (!inv || inv.type !== "ark") continue;
-              if (inv.received >= inv.amount && inv.amount > 0) continue;
-              if (inv.amount > 0 && tx.amount < inv.amount) continue;
-              inv.received += tx.amount;
-              p.iid = iid;
-              await s(`invoice:${iid}`, inv);
-              await s(`payment:${p.id}`, p);
-              emit(uid, "payment", p);
-              break;
-            }
-          }
-        }
-
-        const { balance } = body;
-        if (typeof balance === "number" && balance >= 0) {
-          const paymentIds = await db.lRange(`${aid}:payments`, 0, -1);
-          let expectedBalance = 0;
-          const now = Date.now();
-          let hasRecentPayments = false;
-          for (const pid of paymentIds) {
-            const pay = await g(`payment:${pid}`);
-            if (pay) {
-              expectedBalance += pay.amount;
-              if (pay.amount > 0 && now - pay.created < 120_000) {
-                hasRecentPayments = true;
-              }
-            }
-          }
-
-          if (expectedBalance > balance && !hasRecentPayments) {
-            const p = (await createArkPayment({
-              aid,
-              uid,
-              amount: balance - expectedBalance,
-              hash: `expired-${Date.now()}`,
-              rate,
-              currency,
-              created: Date.now(),
-              extraHashMappings: [],
-            })) as any;
-            p.memo = "expired";
-            await s(`payment:${p.id}`, p);
-            payments.push(p);
-            synced++;
-          }
-        }
-
-        let forward;
-        if (received > 0) {
-          const account = await g(`account:${aid}`);
-          if (account?.arkAddress) {
-            const iid = await g(`custodial-ark-invoice:${account.arkAddress}`);
-            if (iid) {
-              const inv = await getInvoice(iid);
-              if (inv && (inv.received < inv.amount || inv.amount === 0)) {
-                const serverArkAddress = await getArkAddress();
-                forward = {
-                  iid,
-                  amount: inv.amount || received,
-                  serverArkAddress,
-                };
-              }
-            }
-          }
-        }
-
-        return c.json({ synced, received, payments, forward });
-      } finally {
-        await db.del(lockKey);
-      }
     } catch (e) {
       return bail(c, e.message);
     }
