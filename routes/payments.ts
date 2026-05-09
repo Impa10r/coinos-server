@@ -967,8 +967,7 @@ export default {
   async lbtcHotBalance(c) {
     try {
       const balances = await lq.getBalance();
-      const assetId = config.liquid.btc;
-      const amount = sats(balances[assetId] || 0);
+      const amount = sats(balances.bitcoin || balances[config.liquid.btc] || 0);
       return c.json({ amount });
     } catch (e) {
       return bail(c, e.message);
