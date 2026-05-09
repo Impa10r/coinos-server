@@ -1174,6 +1174,11 @@ export const build = async ({ aid, amount, address, feeRate, subtract, user }) =
   amount = Number.parseInt(amount);
   if (amount < 0) fail("invalid amount");
 
+  if (isBitcoin) {
+    const hotBalance = sats(await node.getBalance());
+    if (hotBalance < amount) fail("Amount exceeds hot wallet balance");
+  }
+
   const fees: any =
     type === PaymentType.liquid
       ? { fastestFee: 0.1, halfHourFee: 0.1, hourFee: 0.1, minimumFee: 0.1 }
