@@ -1,9 +1,9 @@
-// Delete one or more users by username.
+// Delete one or more users by username or uid.
 // Authorized cleanup only — destructive. Defaults to dry-run.
 //
 // Usage:
-//   bun scripts/delete-user.ts <username> [<username> …]            # dry-run
-//   bun scripts/delete-user.ts <username> [<username> …] --confirm   # actually delete
+//   bun scripts/delete-user.ts <username|uid> [<username|uid> …]            # dry-run
+//   bun scripts/delete-user.ts <username|uid> [<username|uid> …] --confirm  # actually delete
 //
 // Mirrors users.deleteUser scope: removes user:<id>, user:<username>,
 // user:<pubkey>, account:<id>, <id>:accounts, <id>:apps, follows/followers
@@ -11,49 +11,68 @@
 //
 // Does NOT touch <id>:payments, <id>:invoices, or TigerBeetle balance
 // accounts. Run inside the app container so it picks up $lib/db config:
-//   docker exec -it app bun scripts/delete-user.ts alice bob --confirm
+//   docker exec -it app bun scripts/delete-user.ts alice 06401f5a-... --confirm
 
 import { db } from "$lib/db";
 
+const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const argv = process.argv.slice(2);
 const dryRun = !argv.includes("--confirm");
-const usernames = argv.filter((a) => !a.startsWith("--")).map((u) => u.toLowerCase().trim());
+const inputs = argv.filter((a) => !a.startsWith("--")).map((u) => u.toLowerCase().trim());
 
-if (usernames.length === 0) {
-  console.error("Usage: bun scripts/delete-user.ts <username> [<username> …] [--confirm]");
+if (inputs.length === 0) {
+  console.error("Usage: bun scripts/delete-user.ts <username|uid> [...] [--confirm]");
   process.exit(1);
 }
 
 const candidates: {
-  username: string;
-  uid: string | null;
+  username: string | null;
+  uid: string;
   pubkey: string | null;
   appKeys: string[];
 }[] = [];
 
-for (const username of usernames) {
-  const uidRaw = await db.get(`user:${username}`);
-  if (!uidRaw) {
-    console.log(`  ${username}: NOT FOUND`);
+for (const input of inputs) {
+  let uid: string | null = null;
+
+  if (uuidRe.test(input)) {
+    uid = input;
+  } else {
+    const uidRaw = await db.get(`user:${input}`);
+    if (uidRaw) {
+      try {
+        uid = JSON.parse(String(uidRaw));
+      } catch {
+        uid = String(uidRaw);
+      }
+    }
+  }
+
+  if (!uid) {
+    console.log(`  ${input}: NOT FOUND`);
     continue;
   }
-  // user:<username> stores the uid JSON-stringified, so it comes back quoted.
-  let uid: string;
-  try {
-    uid = JSON.parse(String(uidRaw));
-  } catch {
-    uid = String(uidRaw);
-  }
+
   const raw = await db.get(`user:${uid}`);
   const u = raw ? JSON.parse(String(raw)) : null;
   const appKeys = [...(await db.sMembers(`${uid}:apps`))].map(String);
+  const username = u?.username?.toLowerCase() ?? (uuidRe.test(input) ? null : input);
+
+  if (!u && !appKeys.length && !(await db.exists(`${uid}:accounts`))) {
+    console.log(`  ${input}: no user record, accounts, or apps for uid=${uid} — skipping`);
+    continue;
+  }
+
   candidates.push({
     username,
     uid,
     pubkey: u?.pubkey ?? null,
     appKeys,
   });
-  console.log(`  ${username}: uid=${uid} pubkey=${u?.pubkey ?? "(none)"} apps=${appKeys.length}`);
+  console.log(
+    `  ${input}: uid=${uid} username=${username ?? "(none)"} pubkey=${u?.pubkey ?? "(none)"} apps=${appKeys.length}`,
+  );
 }
 
 if (candidates.length === 0) {
@@ -74,11 +93,8 @@ for (const c of candidates) {
     const m = db.multi();
     for (const k of c.appKeys) m.del(`app:${k}`);
 
-    m.del(`user:${c.username}`)
-      .del(`user:${c.uid}`)
-      .del(`account:${c.uid}`)
-      .del(`${c.uid}:accounts`)
-      .del(`${c.uid}:apps`);
+    if (c.username) m.del(`user:${c.username}`);
+    m.del(`user:${c.uid}`).del(`account:${c.uid}`).del(`${c.uid}:accounts`).del(`${c.uid}:apps`);
 
     if (c.pubkey) {
       m.del(`user:${c.pubkey}`)
@@ -89,9 +105,9 @@ for (const c of candidates) {
 
     await m.exec();
     deleted++;
-    console.log(`  deleted ${c.username}`);
+    console.log(`  deleted ${c.username ?? c.uid}`);
   } catch (e: any) {
-    console.error(`  FAILED ${c.username}: ${e.message}`);
+    console.error(`  FAILED ${c.username ?? c.uid}: ${e.message}`);
   }
 }
 
