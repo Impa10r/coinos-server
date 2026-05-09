@@ -57,10 +57,10 @@ for await (const key of (db as any).scanIterator({ MATCH: "account:*", COUNT: 20
 
 if (includePayments) {
   console.log("scanning payment:* (slow) …");
-  // arkReceive stores credits as payment records with the *invoice's* type
-  // (lightning/bitcoin/liquid) but a UUID hash. Real credits of those types
-  // always carry a bolt11 / address / 64-hex txid, never a UUID.
-  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  // arkReceive routed through createArkPayment, which writes a payment with
+  // type taken from the invoice (lightning / bitcoin / liquid / bolt12) but
+  // *no ref field* — real credits always set ref (preimage for lightning,
+  // txid:vout for bitcoin/liquid). That's the unmistakable signature.
   const fraudTypes = new Set(["lightning", "bolt12", "bitcoin", "liquid"]);
 
   for await (const key of (db as any).scanIterator({ MATCH: "payment:*", COUNT: 500 })) {
@@ -71,14 +71,14 @@ if (includePayments) {
       const p = JSON.parse(String(raw));
       if (!p?.uid) continue;
       const isArkType = p.type === "ark";
-      const looksFraud =
-        fraudTypes.has(p.type) && typeof p.hash === "string" && uuidRe.test(p.hash);
+      // amount > 0 excludes debits (sends); fraud is always a credit.
+      const looksFraud = fraudTypes.has(p.type) && p.amount > 0 && !p.ref;
       if (!isArkType && !looksFraud) continue;
       uids.add(p.uid);
       if (!reasons[p.uid]?.some((r) => r.startsWith("payment"))) {
         noteReason(
           p.uid,
-          looksFraud ? `payment:${p.id} (${p.type} +${p.amount} UUID hash)` : `payment:${p.id}`,
+          looksFraud ? `payment:${p.id} (${p.type} +${p.amount} no ref)` : `payment:${p.id}`,
         );
       }
     } catch {}
