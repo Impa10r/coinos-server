@@ -32,17 +32,24 @@ const candidates: {
 }[] = [];
 
 for (const username of usernames) {
-  const uid = await db.get(`user:${username}`);
-  if (!uid) {
+  const uidRaw = await db.get(`user:${username}`);
+  if (!uidRaw) {
     console.log(`  ${username}: NOT FOUND`);
     continue;
   }
-  const raw = await db.get(`user:${String(uid)}`);
+  // user:<username> stores the uid JSON-stringified, so it comes back quoted.
+  let uid: string;
+  try {
+    uid = JSON.parse(String(uidRaw));
+  } catch {
+    uid = String(uidRaw);
+  }
+  const raw = await db.get(`user:${uid}`);
   const u = raw ? JSON.parse(String(raw)) : null;
-  const appKeys = [...(await db.sMembers(`${String(uid)}:apps`))].map(String);
+  const appKeys = [...(await db.sMembers(`${uid}:apps`))].map(String);
   candidates.push({
     username,
-    uid: String(uid),
+    uid,
     pubkey: u?.pubkey ?? null,
     appKeys,
   });
