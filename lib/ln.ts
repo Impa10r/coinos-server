@@ -90,12 +90,23 @@ function lightningProxy(rpcPath: string): any {
     }
   }
 
+  function reset() {
+    try {
+      client?.client?.destroy?.();
+    } catch {}
+    try {
+      client?.removeAllListeners?.();
+    } catch {}
+    client = null;
+  }
+
   return new Proxy(
     {},
     {
       get(_t, prop: string | symbol) {
         if (prop === "toString") return () => "[LightningProxy]";
         if (prop === Symbol.toStringTag) return "LightningProxy";
+        if (prop === "_reset") return reset;
 
         return async (...args: any[]) => {
           const c = ensure();

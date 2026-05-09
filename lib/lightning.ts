@@ -9,6 +9,7 @@ import { getInvoice, getPayment, getUser } from "$lib/utils";
 
 const LISTENER_RETRY_DELAY = 5000; // 5 seconds
 const MAX_LISTENER_RETRIES = 10;
+const WAIT_TIMEOUT = 5 * 60 * 1000; // 5 min — abandon a hung waitanyinvoice
 let listenerRetries = 0;
 let listenerActive = false;
 
@@ -24,7 +25,20 @@ export async function listenForLightning() {
     const payIndex = (await g("pay_index")) || 0;
     // l(`lightning listener: waiting for invoice (pay_index=${payIndex})`);
 
-    const inv = await lnListen.waitanyinvoice(payIndex);
+    let timer: any;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        (lnListen as any)._reset();
+        reject(new Error(`waitanyinvoice timeout after ${WAIT_TIMEOUT}ms`));
+      }, WAIT_TIMEOUT);
+    });
+
+    let inv: any;
+    try {
+      inv = await Promise.race([lnListen.waitanyinvoice(payIndex), timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
     const {
       local_offer_id,
       bolt11,
@@ -118,7 +132,27 @@ export async function listenForLightning() {
   }
 }
 
-export function ensureListenerAlive() {
+export async function ensureListenerAlive() {
+  try {
+    const payIndex = Number((await g("pay_index")) || 0);
+    const { invoices } = await ln.listinvoices();
+    let cln = 0;
+    for (const i of invoices) {
+      if (i.status === "paid" && typeof i.pay_index === "number" && i.pay_index > cln) {
+        cln = i.pay_index;
+      }
+    }
+    if (cln > payIndex) {
+      warn(`lightning listener: CLN ahead (${cln} > ${payIndex}), forcing restart`);
+      (lnListen as any)._reset();
+      listenerActive = false;
+      listenForLightning();
+      return;
+    }
+  } catch (e: any) {
+    warn("ensureListenerAlive check failed", e.message);
+  }
+
   if (!listenerActive) {
     warn("lightning listener: not active, restarting");
     listenForLightning();
