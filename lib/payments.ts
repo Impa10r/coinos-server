@@ -144,6 +144,12 @@ export const acquireArkLock = async (hash) => {
   if (!locked) fail("Already processed");
 };
 
+export const requireAccountOwnership = async (uid: string, aid: string) => {
+  if (!aid) fail("Missing account id");
+  const pos = await db.lPos(`${uid}:accounts`, aid);
+  if (pos === null) fail("Unauthorized");
+};
+
 export const createArkPayment = async ({
   aid,
   uid,
@@ -344,15 +350,14 @@ export const credit = async ({
     await db.sAdd("missing", ref.split(":")[0]);
     return;
   }
-  
+
   const lockKey = `lock:credit:${hash}`;
   const locked = await db.setNX(lockKey, "1");
   if (!locked) fail("Payment already being processed");
   await db.expire(lockKey, 30);
 
-  if (inv.received >= amount && inv.type !== PaymentType.bolt12)
-    fail("Invoice already paid");
-  
+  if (inv.received >= amount && inv.type !== PaymentType.bolt12) fail("Invoice already paid");
+
   let { path, tip } = inv;
   tip = Number.parseInt(tip) || 0;
 

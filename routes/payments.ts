@@ -11,6 +11,7 @@ import { err, l, warn } from "$lib/logging";
 import mqtt from "$lib/mqtt";
 import {
   acquireArkLock,
+  requireAccountOwnership,
   build,
   completePayment,
   createArkPayment,
@@ -569,13 +570,13 @@ export default {
 
   async confirm(c) {
     const body = await c.req.json();
-    const { txid, wallet, type } = body;
+    const { txid, wallet, type, secret } = body;
 
     if (type !== PaymentType.liquid) return c.json({});
 
     try {
       if (secret !== config.adminpass) fail("unauthorized");
-      
+
       const node = rpc({ ...config[type], wallet });
       const { confirmations, details } = await node.getTransaction(txid);
 
@@ -599,9 +600,9 @@ export default {
             const rates = await g("rates");
             let walkRate = 0;
             try {
-              const book = await got(
+              const book = (await got(
                 "https://api-pub.bitfinex.com/v2/book/tBTCUST/P0?len=25",
-              ).json() as [number, number, number][];
+              ).json()) as [number, number, number][];
               const asks = book
                 .filter(([, , a]) => a < 0)
                 .map(([p, , a]) => [p, Math.abs(a)] as [number, number])
@@ -1011,6 +1012,7 @@ export default {
       const user = c.get("user");
       const hash = body.hash || body.arkTxid;
       const { aid } = body;
+      await requireAccountOwnership(user.id, aid);
 
       if (!hash) fail("Missing transaction hash");
       await acquireArkLock(hash);
