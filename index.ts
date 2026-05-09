@@ -154,6 +154,7 @@ app.post("/bitcoin/send", auth, payments.send);
 app.post("/liquid/usdt/send", auth, payments.sendUsdt);
 app.get("/liquid/usdt/balance", auth, payments.usdtBalance);
 app.get("/bitcoin/hot-balance", auth, payments.btcHotBalance);
+app.get("/liquid/hot-balance", auth, payments.lbtcHotBalance);
 app.post("/account/delete", auth, users.deleteAccount);
 app.post("/user/delete", auth, users.deleteUser);
 app.get("/account/:id", auth, users.account);

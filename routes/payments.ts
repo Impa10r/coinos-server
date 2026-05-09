@@ -963,4 +963,15 @@ export default {
       return bail(c, e.message);
     }
   },
+
+  async lbtcHotBalance(c) {
+    try {
+      const balances = await lq.getBalance();
+      const assetId = config.liquid.btc;
+      const amount = sats(balances[assetId] || 0);
+      return c.json({ amount });
+    } catch (e) {
+      return bail(c, e.message);
+    }
+  },
 };
