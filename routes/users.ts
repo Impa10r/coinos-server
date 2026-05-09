@@ -241,8 +241,6 @@ export default {
     const body = await c.req.json();
     const headers = c.req.header();
     try {
-      if (!config.openRegistrations) fail("Registrations are temporarily disabled");  // ← add this
-      
       const ip = headers["cf-connecting-ip"];
       if (!body.user) fail("no user object provided");
       let { user } = body;
