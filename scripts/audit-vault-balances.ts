@@ -45,13 +45,14 @@ for await (const key of (db as any).scanIterator({ MATCH: "account:*", COUNT: 20
     continue;
   }
 
-  // vault = has pubkey + fingerprint (or seed). Custodial main accounts have neither.
-  const isVault = !!(acc?.pubkey && acc?.fingerprint);
-  if (!isVault) continue;
-  if (acc?.type && acc.type !== "bitcoin") continue;
+  // include any account that was created as a bitcoin sub-wallet,
+  // regardless of whether pubkey/fingerprint/seed are populated.
+  const isBitcoinSub = acc?.type === "bitcoin" || acc?.pubkey || acc?.seed;
+  if (!isBitcoinSub) continue;
 
   const aid = acc.id;
   const uid = acc.uid;
+  if (!aid) continue;
 
   // sum coinos's payment records for this account
   const paymentIds = (await db.lRange(`${aid}:payments`, 0, -1)) as string[];
