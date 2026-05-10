@@ -15,7 +15,7 @@
 // counters. Does NOT touch <id>:payments, <id>:invoices, or TigerBeetle
 // balance accounts — handle those separately if needed.
 
-import { db } from "$lib/db";
+import { db, scan } from "$lib/db";
 
 const args = new Set(process.argv.slice(2));
 const dryRun = !args.has("--confirm");
@@ -30,7 +30,7 @@ const noteReason = (uid: string, reason: string) => {
 };
 
 console.log("scanning arkaddr:* …");
-for await (const key of (db as any).scanIterator({ MATCH: "arkaddr:*", COUNT: 200 })) {
+for await (const key of scan("arkaddr:*")) {
   const raw = await db.get(String(key));
   if (!raw) continue;
   try {
@@ -43,7 +43,7 @@ for await (const key of (db as any).scanIterator({ MATCH: "arkaddr:*", COUNT: 20
 }
 
 console.log("scanning account:* …");
-for await (const key of (db as any).scanIterator({ MATCH: "account:*", COUNT: 200 })) {
+for await (const key of scan("account:*")) {
   const raw = await db.get(String(key));
   if (!raw) continue;
   try {
@@ -63,7 +63,7 @@ if (includePayments) {
   // txid:vout for bitcoin/liquid). That's the unmistakable signature.
   const fraudTypes = new Set(["lightning", "bolt12", "bitcoin", "liquid"]);
 
-  for await (const key of (db as any).scanIterator({ MATCH: "payment:*", COUNT: 500 })) {
+  for await (const key of scan("payment:*")) {
     if (String(key).split(":").length !== 2) continue; // skip payment:<aid>:<hash> reverse mappings
     const raw = await db.get(String(key));
     if (!raw) continue;

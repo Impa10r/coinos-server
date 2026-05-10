@@ -12,7 +12,7 @@
 //   docker exec -it app bun scripts/audit-vault-balances.ts --tainted-only
 
 import config from "$config";
-import { db } from "$lib/db";
+import { db, scan } from "$lib/db";
 import rpc from "@coinos/rpc";
 
 const argv = new Set(process.argv.slice(2));
@@ -34,7 +34,7 @@ const rows: Row[] = [];
 
 console.log("scanning account:* …");
 
-for await (const key of (db as any).scanIterator({ MATCH: "account:*", COUNT: 200 })) {
+for await (const key of scan("account:*")) {
   const raw = await db.get(String(key));
   if (!raw) continue;
 
