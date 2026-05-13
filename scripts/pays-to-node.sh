@@ -11,7 +11,7 @@ set -euo pipefail
 
 DEST="${1:?Usage: $0 <node_pubkey>}"
 
-docker exec cl lightning-cli listpays \
+docker exec cl lightning-cli --lightning-dir=/app/lightning listpays \
   | jq -r --arg d "$DEST" '.pays[]
       | select(.destination==$d and .status=="complete")
       | "\(.bolt11)\t\(.amount_sent_msat)\t\(.completed_at)"' \
