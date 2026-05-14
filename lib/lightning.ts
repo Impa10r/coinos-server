@@ -9,9 +9,16 @@ import { getInvoice, getPayment, getUser } from "$lib/utils";
 
 const LISTENER_RETRY_DELAY = 5000; // 5 seconds
 const MAX_LISTENER_RETRIES = 10;
-const WAIT_TIMEOUT = 5 * 60 * 1000; // 5 min — abandon a hung waitanyinvoice
+const WAIT_TIMEOUT = 5 * 60 * 1000; // 5 min — refresh the long-poll socket
 let listenerRetries = 0;
 let listenerActive = false;
+
+class WaitanyinvoiceIdleRefresh extends Error {
+  constructor() {
+    super(`waitanyinvoice idle refresh after ${WAIT_TIMEOUT}ms`);
+    this.name = "WaitanyinvoiceIdleRefresh";
+  }
+}
 
 export async function listenForLightning() {
   if (listenerActive) {
@@ -29,7 +36,7 @@ export async function listenForLightning() {
     const timeout = new Promise((_, reject) => {
       timer = setTimeout(() => {
         (lnListen as any)._reset();
-        reject(new Error(`waitanyinvoice timeout after ${WAIT_TIMEOUT}ms`));
+        reject(new WaitanyinvoiceIdleRefresh());
       }, WAIT_TIMEOUT);
     });
 
@@ -100,6 +107,15 @@ export async function listenForLightning() {
     }
   } catch (e: any) {
     listenerActive = false;
+
+    // Idle refresh: no payment arrived within WAIT_TIMEOUT. We proactively
+    // reset the long-poll socket to avoid silent socket death, but this is
+    // not a failure — don't bump the retry counter or restart the container.
+    if (e instanceof WaitanyinvoiceIdleRefresh) {
+      setTimeout(listenForLightning, LISTENER_RETRY_DELAY);
+      return;
+    }
+
     const errorCode = e?.code ?? e?.errno ?? "unknown";
     const errorMsg = e?.message ?? String(e);
 

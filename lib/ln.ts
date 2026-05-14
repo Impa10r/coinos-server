@@ -70,10 +70,23 @@ function lightningProxy(rpcPath: string): any {
 
     try {
       client = new LightningClient(rpcPath);
+      const created = client;
       // Prevent unhandled 'error' events from crashing the process
-      client.on("error", (e: any) => {
-        if (isSocketDied(e)) client = null;
+      created.on("error", (e: any) => {
+        if (isSocketDied(e)) {
+          if (client === created) client = null;
+        }
       });
+      // When the peer closes the RPC socket (CLN restart, idle-timeout,
+      // socket-died), clightning-client's internal reconnect cannot
+      // recover because its readline interface closes on `end`. Drop the
+      // cached client so the next call builds a fresh one with a live
+      // readline.
+      const drop = () => {
+        if (client === created) client = null;
+      };
+      created.client?.on?.("end", drop);
+      created.client?.on?.("close", drop);
       backoff = 250;
       nextTryAt = 0;
       return client;
