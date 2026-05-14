@@ -1725,17 +1725,37 @@ const freezeCheck = async () => {
 };
 setTimeout(freezeCheck, 10_000);
 
+const KEEP_LND_TIMEOUT = 30_000;
+const withDeadline = <T>(p: Promise<T>, label: string) =>
+  new Promise<T>((resolve, reject) => {
+    const t = setTimeout(
+      () => reject(new Error(`${label} timed out after ${KEEP_LND_TIMEOUT}ms`)),
+      KEEP_LND_TIMEOUT,
+    );
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
+
 export const keepLndConnected = async () => {
-  if (!lnd || !(config as any).lnd?.clnp2p) return;
   try {
-    const { id } = await ln.getinfo();
-    const connected = await lnd.isPeerConnected(id);
+    if (!lnd || !(config as any).lnd?.clnp2p) return;
+    const { id } = (await withDeadline(ln.getinfo(), "ln.getinfo")) as any;
+    const connected = await withDeadline(lnd.isPeerConnected(id), "lnd.isPeerConnected");
     if (!connected) {
       l("lnd: CLN peer disconnected, reconnecting...");
-      await lnd.connectPeer(id, (config as any).lnd.clnp2p);
+      await withDeadline(lnd.connectPeer(id, (config as any).lnd.clnp2p), "lnd.connectPeer");
     }
   } catch (e: any) {
-    warn("lnd reconnect", e.message);
+    warn("lnd reconnect", e?.message ?? String(e));
+  } finally {
+    setTimeout(keepLndConnected, 60_000);
   }
-  setTimeout(keepLndConnected, 60_000);
 };
