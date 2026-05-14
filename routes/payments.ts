@@ -670,15 +670,25 @@ export default {
   },
 
   async freeze(c) {
-    const body = await c.req.json();
-    const { secret } = body;
     try {
-      if (secret !== config.adminpass) fail("unauthorized");
+      let body: any;
+      try {
+        body = await c.req.json();
+      } catch {
+        return c.json({ error: "invalid JSON body" }, 400);
+      }
+      const secret = body?.secret;
+      if (typeof secret !== "string") {
+        return c.json({ error: "missing secret" }, 400);
+      }
+      if (secret !== config.adminpass) {
+        return c.json({ error: "unauthorized" }, 401);
+      }
       await s("freeze", true);
-      return c.json("ok");
-    } catch (e) {
+      return c.json({ ok: true });
+    } catch (e: any) {
       console.log(e);
-      return bail(c, e.message);
+      return c.json({ error: e?.message ?? "internal error" }, 500);
     }
   },
 
