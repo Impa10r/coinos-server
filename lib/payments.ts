@@ -989,19 +989,20 @@ export const sendLightning = async ({
     }
   } catch (e) {
     err("failed to pay", pr.substr(-8));
-    await db.sRem("pending", pr);
 
     // Before reversing, double-check whether the payment actually settled
     // on the LN network. xpay may throw on timeout while the HTLC still
     // completes — reversing in that case mints free balance for the user.
     let settled = false;
+    let verified = false;
     try {
       const { pays } = await outLn.listpays(pr);
       settled = pays.some((x: any) => x.status === "complete" || x.status === "pending");
+      verified = true;
     } catch (e2: any) {
       warn("listpays check failed", pr.substr(-8), e2.message);
       // Conservative: if we can't verify, treat as settled — better to
-      // strand a debit and reconcile manually than mint free balance.
+      // strand a debit and reconcile via check() later than mint free balance.
       settled = true;
       try {
         const line = `${new Date().toISOString()} ${pr.substr(-8)} pid=${p.id} amount=${amount} ${e2.message ?? e2}\n`;
@@ -1011,12 +1012,22 @@ export const sendLightning = async ({
       } catch {}
     }
 
-    if (settled) {
+    if (settled && verified) {
+      // listpays says complete or pending → leave debit, mark finalized.
+      await db.sRem("pending", pr);
       err("NOT reversing — payment is complete or pending on LN despite xpay error", pr.substr(-8));
       try {
         if (p.id) await finalize({ payment_preimage: "" }, p);
       } catch {}
+    } else if (settled && !verified) {
+      // listpays errored — we don't know the real state. Keep the entry in
+      // the `pending` set so check() can re-attempt listpays every 2s and
+      // resolve to finalize or reverse once CLN responds. Without this the
+      // debit is stranded indefinitely (only a manual fix on verify-failed.log).
+      err("NOT reversing — listpays unavailable, queued for check() retry", pr.substr(-8));
+      // No sRem here; the original sAdd from line ~968 stands.
     } else {
+      await db.sRem("pending", pr);
       try {
         await reverse(p);
       } catch {}
