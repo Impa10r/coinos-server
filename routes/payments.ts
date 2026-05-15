@@ -613,9 +613,9 @@ export default {
         }
       }
       return c.json({});
-    } catch (e) {
+    } catch (e: any) {
       console.log(e);
-      warn(`problem processing ${txid}`);
+      warn(`problem processing ${txid}`, e?.message ?? String(e));
       return bail(c, e.message);
     }
   },
