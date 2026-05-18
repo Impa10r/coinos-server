@@ -1,7 +1,7 @@
 import config from "$config";
 import api from "$lib/api";
 import { requirePin } from "$lib/auth";
-import { archive, db, g, gf, gfAll, s } from "$lib/db";
+import { archive, db, g, gf, gfAll, s, sa } from "$lib/db";
 import { getTx } from "$lib/esplora";
 import { generate, getUserOffer } from "$lib/invoices";
 import { replay } from "$lib/lightning";
@@ -177,6 +177,7 @@ export default {
         warn("user", id, "missing payment", payments[i]);
         continue;
       }
+      if (p.revertedDuplicate) continue;
       if (received && p.amount < 0) continue;
       if (p.created < start || p.created > end) continue;
       validPayments.push(p);
@@ -682,10 +683,24 @@ export default {
             ...extraFields,
           });
         } else if (confirmations >= 1) {
-          if (p.confirmed) continue;
+          // Atomic guard against concurrent /confirm callers double-crediting:
+          // walletnotify, catchUp, and bulk sweeps can all fire for the same
+          // txid:vout in parallel. Without this, two callers can each read
+          // p.confirmed=false and each run the multi() that increments balance.
+          const lockKey = `confirmlock:${txid}:${vout}`;
+          const acquired = await db.set(lockKey, "1", { NX: true, EX: 60 });
+          if (!acquired) continue;
+
+          if (p.confirmed) {
+            await db.del(lockKey);
+            continue;
+          }
 
           const invoice = await getInvoice(address);
-          if (!invoice) continue;
+          if (!invoice) {
+            await db.del(lockKey);
+            continue;
+          }
 
           p.confirmed = true;
           invoice.received += Number.parseInt(invoice.pending);
@@ -700,6 +715,14 @@ export default {
             .set(`invoice:${invoice.id}`, JSON.stringify(invoice))
             .set(`payment:${p.id}`, JSON.stringify(p))
             .exec();
+
+          // Mirror the now-confirmed record into arc so a future bulk sweep
+          // finds it via gf() fallback even if the main-db pointer is wiped
+          // (see feedback_apr29_double_credit_incident.md).
+          await sa(`payment:${p.id}`, p);
+          await sa(`invoice:${invoice.id}`, invoice);
+
+          await db.del(lockKey);
 
           const user = await g(`user:${p.uid}`);
           await completePayment(invoice, p, user);
