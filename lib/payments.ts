@@ -1228,10 +1228,20 @@ const completeLightningInBackground = async ({
       { noFallback: !whitelisted || retryFor < 20 },
     );
 
-    try {
-      if (r.payment_preimage || r.preimage || !r.failed_parts) await finalize(r, p);
-    } catch {
-      warn("failed to process payment", p.id);
+    if (r.payment_preimage || r.preimage || !r.failed_parts) {
+      try {
+        await finalize(r, p);
+      } catch {
+        warn("failed to process payment", p.id);
+      }
+    } else {
+      // xpay returned without throwing but reported failed_parts and no
+      // preimage — finalize was never called, and without this the debit
+      // was left stranded with no verification or reversal (the production
+      // "leaked debit" case). Treat it like a thrown error so the
+      // listpays-based verification/reversal path below still runs.
+      warn("xpay returned failed_parts without throwing", p.id, r.failed_parts);
+      throw new Error("xpay reported failed_parts with no preimage");
     }
   } catch {
     err("failed to pay", pr.substr(-8));
