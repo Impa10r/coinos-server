@@ -515,21 +515,53 @@ export default {
     const body = await c.req.json();
     const { txid, wallet, type, secret } = body;
 
-    if (type !== PaymentType.liquid) return c.json({});
+    if (type !== PaymentType.liquid && type !== PaymentType.bitcoin) return c.json({});
 
     try {
       if (secret !== config.adminpass) fail("unauthorized");
 
       const node = rpc({ ...config[type], wallet });
-      const { confirmations, details } = await node.getTransaction(txid);
+      let tx;
+      try {
+        tx = await node.getTransaction(txid);
+      } catch (e: any) {
+        // RPC_WALLET_NOT_FOUND (-18): wallet was unloaded between
+        // walletnotify-fire and our call. Attempt loadwallet once and retry.
+        const notLoaded = e?.code === -18 || /not loaded|does not exist/i.test(e?.message || "");
+        if (!notLoaded) throw e;
+
+        warn(`confirm: wallet "${wallet}" not loaded, attempting loadwallet`);
+        const { host, port, user, password } = (config as any)[type];
+        const token = btoa(`${user}:${password}`);
+        const loadRes = await fetch(`http://${host}:${port}/`, {
+          method: "POST",
+          headers: { authorization: `Basic ${token}` },
+          body: JSON.stringify({ method: "loadwallet", params: [wallet] }),
+        }).then((r) => r.json());
+        // -4 / "already loaded" means it just got loaded by someone else — fine.
+        if (
+          loadRes?.error &&
+          loadRes.error.code !== -4 &&
+          !/already loaded/i.test(loadRes.error.message || "")
+        ) {
+          throw loadRes.error;
+        }
+        tx = await node.getTransaction(txid);
+      }
+      const { confirmations, details } = tx;
 
       for (const { address, amount, asset, category, vout } of details) {
         if (!address) continue;
-        const isLbtc = asset === config.liquid.btc;
-        const isUsdt = asset === (config.liquid as any).usdt;
-        if (!isLbtc && !isUsdt) continue;
-
         if (category === "send") continue;
+
+        let isUsdt = false;
+        if (type === PaymentType.liquid) {
+          const isLbtc = asset === config.liquid.btc;
+          isUsdt = asset === (config.liquid as any).usdt;
+          if (!isLbtc && !isUsdt) continue;
+        }
+        // Bitcoin tx details have no `asset` field — every non-send output
+        // is a BTC receive, nothing to filter.
 
         const p = await getPayment(`${txid}:${vout}`);
 
