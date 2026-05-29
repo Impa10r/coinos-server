@@ -993,17 +993,16 @@ export const sendLightning = async ({
     // Before reversing, double-check whether the payment actually settled
     // on the LN network. xpay may throw on timeout while the HTLC still
     // completes — reversing in that case mints free balance for the user.
-    let settled = false;
+    let complete: any = null;
+    let pending = false;
     let verified = false;
     try {
       const { pays } = await outLn.listpays(pr);
-      settled = pays.some((x: any) => x.status === "complete" || x.status === "pending");
+      complete = pays.find((x: any) => x.status === "complete");
+      pending = pays.some((x: any) => x.status === "pending");
       verified = true;
     } catch (e2: any) {
       warn("listpays check failed", pr.substr(-8), e2.message);
-      // Conservative: if we can't verify, treat as settled — better to
-      // strand a debit and reconcile via check() later than mint free balance.
-      settled = true;
       try {
         const line = `${new Date().toISOString()} ${pr.substr(-8)} pid=${p.id} amount=${amount} ${e2.message ?? e2}\n`;
         await (
@@ -1012,21 +1011,24 @@ export const sendLightning = async ({
       } catch {}
     }
 
-    if (settled && verified) {
-      // listpays says complete or pending → leave debit, mark finalized.
+    if (verified && complete) {
+      // Payment settled on LN. Finalize and clear from pending.
       await db.sRem("pending", pr);
-      err("NOT reversing — payment is complete or pending on LN despite xpay error", pr.substr(-8));
+      err("NOT reversing — payment completed on LN despite xpay error", pr.substr(-8));
       try {
-        if (p.id) await finalize({ payment_preimage: "" }, p);
+        await finalize(complete, p);
       } catch {}
-    } else if (settled && !verified) {
-      // listpays errored — we don't know the real state. Keep the entry in
-      // the `pending` set so check() can re-attempt listpays every 2s and
-      // resolve to finalize or reverse once CLN responds. Without this the
-      // debit is stranded indefinitely (only a manual fix on verify-failed.log).
-      err("NOT reversing — listpays unavailable, queued for check() retry", pr.substr(-8));
+    } else if (!verified || pending) {
+      // Either listpays errored (unknown state) or sendpay is still in
+      // flight (could go either way). Keep entry in `pending` so check()
+      // reconciles to finalize or reverse once the real status lands.
+      err(
+        "NOT reversing — payment pending or listpays unavailable, queued for check()",
+        pr.substr(-8),
+      );
       // No sRem here; the original sAdd from line ~968 stands.
     } else {
+      // verified + no complete + no pending = all failed → safe to reverse.
       await db.sRem("pending", pr);
       try {
         await reverse(p);
