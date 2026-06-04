@@ -974,6 +974,40 @@ export const sendLightning = async ({
 
   l("paying lightning invoice", pr.substr(-8), amount, fee);
 
+  // Fire-and-forget the actual LN send. Resolution (success, reverse,
+  // or queued for check()) emits a payment event so the UI can refresh
+  // /sent/<id> in real time. We don't await — the response goes back to
+  // the user immediately with p so the form action redirects right away.
+  void completeLightningInBackground({
+    p,
+    pr,
+    amount,
+    amount_msat,
+    fee,
+    retryFor,
+    whitelisted: !!whitelisted,
+  });
+
+  return p;
+};
+
+const completeLightningInBackground = async ({
+  p,
+  pr,
+  amount,
+  amount_msat,
+  fee,
+  retryFor,
+  whitelisted,
+}: {
+  p: any;
+  pr: string;
+  amount: number;
+  amount_msat: number | undefined;
+  fee: number;
+  retryFor: number;
+  whitelisted: boolean;
+}) => {
   try {
     const r = await outLn.xpay(
       {
@@ -986,11 +1020,11 @@ export const sendLightning = async ({
     );
 
     try {
-      if (r.payment_preimage || r.preimage || !r.failed_parts) p = await finalize(r, p);
+      if (r.payment_preimage || r.preimage || !r.failed_parts) await finalize(r, p);
     } catch {
       warn("failed to process payment", p.id);
     }
-  } catch (e) {
+  } catch (e: any) {
     err("failed to pay", pr.substr(-8));
 
     // Before reversing, double-check whether the payment actually settled
@@ -1037,10 +1071,7 @@ export const sendLightning = async ({
         await reverse(p);
       } catch {}
     }
-    throw e;
   }
-
-  return p;
 };
 
 export const sendInternal = async ({
@@ -1681,6 +1712,7 @@ const finalize = async (r, p) => {
   }
 
   nwcNotify(p);
+  emit(p.uid, "payment", p);
   return p;
 };
 
@@ -1711,6 +1743,7 @@ export const reverse = async (p) => {
     .exec();
 
   warn("reversed", p.id);
+  emit(p.uid, "payment", { id: p.id, hash: p.hash, uid: p.uid, type: p.type, reversed: true });
 };
 
 const freezeCheck = async () => {
