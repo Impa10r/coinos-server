@@ -14,7 +14,6 @@
 
 import { createClient } from "redis";
 
-const full = process.argv.includes("--full");
 const exN = Number(process.argv[process.argv.indexOf("--examples") + 1]) || 30;
 
 const db = createClient({ url: "redis://127.0.0.1:6379", socket: { reconnectStrategy: () => false } });
@@ -36,26 +35,33 @@ for await (const batch of db.scanIterator({ MATCH: "user:*", COUNT: 2000 })) {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-/.test(uid)) continue; // skip username pointers
   scanned++;
 
-  const dbLen = await db.lLen(`${uid}:payments`);
+  const dbLen = Number(await db.lLen(`${uid}:payments`));
   if (dbLen > 0) { cleanCount++; continue; } // has visible history
 
   // Empty in db — is it also empty in arc, or just archived?
-  const arcLen = await arc.lLen(`${uid}:payments`);
+  const arcLen = Number(await arc.lLen(`${uid}:payments`));
   if (arcLen > 0) { cleanCount++; continue; } // renders via gf(), fine
 
   // :payments empty in both. Does it matter? Check balance + whether they ever transacted.
-  const bal = parseInt((await db.get(`balance:${uid}`)) || "0", 10);
-  const invLen = await db.lLen(`${uid}:invoices`);
+  const balRaw = await db.get(`balance:${uid}`);
+  const bal = parseInt(balRaw ? String(balRaw) : "0", 10);
+  const invLen = Number(await db.lLen(`${uid}:invoices`));
 
   if (bal > 0) {
-    const u = await db.get(`user:${uid}`);
+    const raw = await db.get(`user:${uid}`);
     let name = uid.slice(0, 8), reset = false;
-    if (u && u[0] === "{") { try { const j = JSON.parse(u); name = j.username || name; reset = j.password === "reset"; } catch {} }
+    if (raw) {
+      const u = String(raw);
+      if (u[0] === "{") { try { const j = JSON.parse(u); name = j.username || name; reset = j.password === "reset"; } catch {} }
+    }
     wipedWithBal.push({ name, uid, bal, reset });
   } else if (invLen > 0) {
-    const u = await db.get(`user:${uid}`);
+    const raw = await db.get(`user:${uid}`);
     let name = uid.slice(0, 8);
-    if (u && u[0] === "{") { try { name = JSON.parse(u).username || name; } catch {} }
+    if (raw) {
+      const u = String(raw);
+      if (u[0] === "{") { try { name = JSON.parse(u).username || name; } catch {} }
+    }
     wipedNoBal.push({ name, uid, invoices: invLen });
   }
   }

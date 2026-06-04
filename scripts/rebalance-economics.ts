@@ -85,8 +85,6 @@ if (beBtc) {
 
 // The deeper truth: because closes scale with throughput, per-sat margin is
 // roughly constant. Show the asymptotic per-BTC economics.
-const big = rebalanceCostSats(10);
-const bigRev = revenueSats(10);
 console.log(
   `\n  At scale (per 1 BTC bridged): revenue ${Math.round(revenueSats(1))}s, ` +
     `rebalance cost ~${Math.round(rebalanceCostSats(1).total)}s, ` +

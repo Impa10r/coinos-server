@@ -1,3 +1,14 @@
+#!/bin/bash
+
+if [ -f config.ts ] || [ -f compose.yml ] || [ -d data ]; then
+  echo "Existing config.ts, compose.yml, or data/ detected."
+  read -p "Overwrite? This will destroy current config and data. (y/N) " confirm
+  if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+    echo "Aborting."
+    exit 1
+  fi
+fi
+
 cp config.ts.sample config.ts
 cp compose.yml.sample compose.yml
 cp -r sampledata data
