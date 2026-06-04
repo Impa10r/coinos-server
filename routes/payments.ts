@@ -47,13 +47,20 @@ export default {
     const body = await c.req.json();
     const user = c.get("user");
 
-    let { amount, hash, fee, fund, memo, payreq, aid } = body;
+    let { amount, hash, fee, fund, memo, payreq, aid, retryFor } = body;
     const balance = await getBalance(user.id);
 
     try {
       if (typeof amount !== "undefined") {
         amount = Number.parseInt(amount);
         if (amount < 0 || amount > SATS || Number.isNaN(amount)) fail("Invalid amount");
+      }
+
+      if (typeof retryFor !== "undefined") {
+        retryFor = Number.parseInt(retryFor);
+        if (Number.isNaN(retryFor) || retryFor < 5 || retryFor > 300) {
+          fail("retryFor must be 5–300 seconds");
+        }
       }
 
       await requirePin({ body, user });
@@ -68,7 +75,7 @@ export default {
           hash = payreq;
           if (!amount) ({ amount } = invoice);
         } else {
-          p = await sendLightning({ user, pr: payreq, amount, fee, memo });
+          p = await sendLightning({ user, pr: payreq, amount, fee, memo, retryFor });
         }
       }
 

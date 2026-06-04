@@ -923,7 +923,7 @@ export const sendLightning = async ({
   amount,
   fee = undefined,
   memo = undefined,
-  retryFor = 30,
+  retryFor = undefined,
 }) => {
   let p;
 
@@ -934,6 +934,11 @@ export const sendLightning = async ({
       fail("Invalid amount");
     }
   }
+
+  // Whitelisted users get LND fallback (faster fail = OK; default 30s).
+  // Non-whitelisted have only CLN, so give it more time to find a route.
+  const whitelisted = await db.sIsMember("whitelist", user?.username?.toLowerCase().trim());
+  if (typeof retryFor === "undefined") retryFor = whitelisted ? 30 : 60;
 
   let { type, invoice_amount_msat, amount_msat, invoice_node_id, payee } = await ln.decode(pr);
   if (type.includes("bolt12")) {
@@ -968,8 +973,6 @@ export const sendLightning = async ({
   await db.sAdd("pending", pr);
 
   l("paying lightning invoice", pr.substr(-8), amount, fee);
-
-  const whitelisted = await db.sIsMember("whitelist", user?.username?.toLowerCase().trim());
 
   try {
     const r = await outLn.xpay(
