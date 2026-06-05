@@ -777,8 +777,19 @@ export default {
         `https://${domain}/.well-known/lnurlp/${username}`,
       ).json()) as any;
 
-      const memo = metadata["text/plain"] || "";
       if (amount * 1000 < minSendable || amount * 1000 > maxSendable) fail("amount out of range");
+
+      // LNURL-pay metadata is a JSON-encoded array of [mime, value] tuples
+      // (LUD-06). Extract text/plain if the recipient set one.
+      let description = "";
+      try {
+        const arr = JSON.parse(metadata);
+        description = arr.find((e: any) => Array.isArray(e) && e[0] === "text/plain")?.[1] || "";
+      } catch {}
+      const memo =
+        description && description !== lnaddress
+          ? `Paying ${lnaddress}: ${description}`
+          : `Paying ${lnaddress}`;
 
       const r: any = await got(`${callback}?amount=${amount * 1000}`).json();
       if (r.reason) fail(r.reason);
