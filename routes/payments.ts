@@ -520,9 +520,20 @@ export default {
 
   async confirm(c) {
     const body = await c.req.json();
-    const { txid, wallet, type, secret } = body;
+    const { txid, type, secret } = body;
+    // bitcoind/elementsd's walletnotify substitutes %w with a shell-quoted
+    // value, so the JSON body can arrive with literal surrounding quotes
+    // (e.g. "'boltz'" instead of "boltz"). Strip them defensively.
+    const wallet = String(body.wallet ?? "").replace(/^['"]|['"]$/g, "");
 
     if (type !== PaymentType.liquid && type !== PaymentType.bitcoin) return c.json({});
+
+    // walletnotify is global to the daemon — it fires for every wallet
+    // on the node, not just ours. Silently ignore wallets we don't manage,
+    // otherwise we'd try (and fail) to RPC into wallets like 'boltz',
+    // 'peerswap', etc.
+    const ourWallet = (config as any)[type]?.wallet;
+    if (ourWallet && wallet && wallet !== ourWallet) return c.json({});
 
     try {
       if (secret !== config.adminpass) fail("unauthorized");
