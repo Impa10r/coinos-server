@@ -24,8 +24,11 @@ await arc.connect();
 
 // Resolve uid -> username lazily (only for examples) to keep memory low.
 async function nameOf(uid: string) {
-  const u = await db.get(`user:${uid}`);
-  if (u && u[0] === "{") { try { return JSON.parse(u).username || uid.slice(0, 8); } catch {} }
+  const raw = await db.get(`user:${uid}`);
+  if (raw) {
+    const u = String(raw);
+    if (u[0] === "{") { try { return JSON.parse(u).username || uid.slice(0, 8); } catch {} }
+  }
   return uid.slice(0, 8);
 }
 
@@ -58,12 +61,13 @@ async function classifyUser(uid: string): Promise<"clean" | "recoverable" | "los
 
 const t0 = Date.now();
 let processed = 0;
-for await (const key of db.scanIterator({ MATCH: "user:*", COUNT: 1000 })) {
+outer: for await (const keys of db.scanIterator({ MATCH: "user:*", COUNT: 1000 })) {
+  for (const key of keys as unknown as string[]) {
   // Only the canonical record key user:<uuid> (skip user:<username> pointers).
-  const id = (key as string).slice("user:".length);
+  const id = key.slice("user:".length);
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-/.test(id)) continue;
   usersScanned++;
-  if (!full && usersScanned > sampleN) break;
+  if (!full && usersScanned > sampleN) break outer;
 
   const cls = await classifyUser(id);
   if (!cls) continue;
@@ -71,6 +75,7 @@ for await (const key of db.scanIterator({ MATCH: "user:*", COUNT: 1000 })) {
   if (cls === "recoverable" && examples.recoverable.length < exN) examples.recoverable.push(id);
   if (cls === "lost" && examples.lost.length < exN) examples.lost.push(id);
   processed++;
+  }
 }
 const secs = ((Date.now() - t0) / 1000).toFixed(1);
 
@@ -99,7 +104,6 @@ if (examples.lost.length) {
   for (const uid of examples.lost) console.log(`    ${await nameOf(uid)}  (${uid})`);
 }
 if (!full) {
-  const est = Math.round((bucket.recoverable / Math.min(usersScanned, sampleN)) * usersScanned);
   console.log(`\n  (sample only — run --full for exact totals)`);
 }
 console.log("═".repeat(66));

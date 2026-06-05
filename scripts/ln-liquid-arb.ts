@@ -25,15 +25,19 @@ async function loadNames() {
   const drain = async () => {
     if (!batch.length) return;
     const vals = await db.mGet(batch);
-    for (const v of vals) {
-      if (!v || v[0] !== "{") continue;
+    for (const raw of vals) {
+      if (!raw) continue;
+      const v = String(raw);
+      if (v[0] !== "{") continue;
       try { const u = JSON.parse(v); if (u.id && u.username) uname.set(u.id, u.username); } catch {}
     }
     batch = [];
   };
-  for await (const k of db.scanIterator({ MATCH: "user:*", COUNT: 1000 })) {
-    batch.push(k as string);
-    if (batch.length >= 500) await drain();
+  for await (const keys of db.scanIterator({ MATCH: "user:*", COUNT: 1000 })) {
+    for (const k of keys as unknown as string[]) {
+      batch.push(k);
+      if (batch.length >= 500) await drain();
+    }
   }
   await drain();
 }
@@ -59,8 +63,10 @@ let batch: string[] = [];
 const drainP = async () => {
   if (!batch.length) return;
   const vals = await db.mGet(batch);
-  for (const v of vals) {
-    if (!v || v[0] !== "{") continue;
+  for (const raw of vals) {
+    if (!raw) continue;
+    const v = String(raw);
+    if (v[0] !== "{") continue;
     let p: any; try { p = JSON.parse(v); } catch { continue; }
     if (!p.created || p.created < cutoff || typeof p.amount !== "number" || !p.uid) continue;
     const rail = p.type;
@@ -71,10 +77,12 @@ const drainP = async () => {
   }
   batch = [];
 };
-for await (const k of db.scanIterator({ MATCH: "payment:*", COUNT: 2000 })) {
-  scanned++;
-  batch.push(k as string);
-  if (batch.length >= 1000) await drainP();
+for await (const keys of db.scanIterator({ MATCH: "payment:*", COUNT: 2000 })) {
+  for (const k of keys as unknown as string[]) {
+    scanned++;
+    batch.push(k);
+    if (batch.length >= 1000) await drainP();
+  }
 }
 await drainP();
 

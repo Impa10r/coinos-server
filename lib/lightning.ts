@@ -172,7 +172,9 @@ export async function ensureListenerAlive() {
   if (!listenerActive) {
     warn("lightning listener: not active, restarting");
     listenForLightning();
+    return;
   }
+
 }
 
 export async function replay(index) {
