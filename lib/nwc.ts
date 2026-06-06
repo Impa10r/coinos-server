@@ -37,7 +37,10 @@ const nwcEventMaxAgeSeconds = 5 * 60;
 const nwcClockSkewSeconds = 60;
 const handledKey = "handled:nwc";
 
-// Per-pubkey rate limiting for NWC requests
+// Per-pubkey rate limiting for NWC requests. 60/min: normal client usage (a
+// balance check or two + a payment + a few lookup_invoice reconciles) blows
+// past a lower cap trivially, and over-limit requests get a RATE_LIMITED
+// reply rather than a silent drop indistinguishable from a lost reply.
 const nwcRateLimit = config.nwcRateLimit ?? 60;
 const nwcRateWindow = 60 * 1000; // 1 minute in ms
 const nwcRequestTimes: Map<string, number[]> = new Map();
@@ -282,9 +285,15 @@ export default () => {
           // resulting spend can't interleave with a concurrent request on the same
           // connection. Read-only methods run without contending for the lock.
           const run = () => handle(method, params, ev, app, user);
-          const result = budgetedMethods.has(method)
+          let result = budgetedMethods.has(method)
             ? await withBudgetLock(app.pubkey, run)
             : await run();
+          // A handler returning nothing (e.g. pay_invoice that couldn't confirm
+          // in time) must still produce an explicit reply, or the client hangs
+          // forever waiting instead of seeing a clear error.
+          if (result === undefined || result === null) {
+            result = { error: { code: "INTERNAL", message: "No response from handler" } };
+          }
           const payload = JSON.stringify({ result_type: method, ...result });
           const convKey = nip44.v2.utils.getConversationKey(skBytes, pubkey);
           content = isNip44
@@ -488,7 +497,12 @@ const handle = (method, params, ev, app, user) =>
       }
 
       try {
-        const { id: pid } = await sendLightning({
+        // sendLightning runs xpay to completion and finalize() sets p.ref to the
+        // preimage on success, so the returned record already carries it — no
+        // need to poll listpays and race a 20s timeout (the old loop returned a
+        // misleading "Payment timed out" error on slow routes even though the
+        // payment had settled; see issue #80).
+        const p = await sendLightning({
           amount,
           fee: max_fee > 0 ? max_fee : undefined,
           user,
@@ -497,21 +511,28 @@ const handle = (method, params, ev, app, user) =>
           retryFor: 25,
         });
 
-        await db.lPush(`${pubkey}:payments`, pid);
+        await db.lPush(`${pubkey}:payments`, p.id);
 
-        // The preimage is attached asynchronously by the payment finalizer.
-        // Poll the payment for up to 100 seconds to resolve the race condition
+        // sendLightning fires the actual send in the background and returns
+        // immediately (see completeLightningInBackground) — the preimage is
+        // attached asynchronously by the finalizer once the HTLC settles.
+        // Poll the payment record for up to 100 seconds to resolve the race
         // where NWC asks for the preimage before finalization has saved it.
         for (let i = 0; i < 100; i++) {
-          const p = await g(`payment:${pid}`);
-          if (p?.ref) return result({ preimage: p.ref });
+          const current = await g(`payment:${p.id}`);
+          if (current?.ref) return result({ preimage: current.ref });
           await sleep(1000);
         }
       } catch (e) {
-        return error({ code: "INTERNAL", message: e.message });
+        return error({ code: "PAYMENT_FAILED", message: e.message });
       }
 
-      return error({ code: "INTERNAL", message: "Preimage not available" });
+      // Still in flight after the polling window: the payment may yet settle.
+      // Tell the client explicitly rather than implying success or hard failure.
+      return error({
+        code: "INTERNAL",
+        message: "Payment still in flight; check status with lookup_invoice",
+      });
     },
 
     async pay_keysend() {
