@@ -788,8 +788,8 @@ export default {
       } catch {}
       const memo =
         description && description !== lnaddress
-          ? `Paying ${lnaddress}: ${description}`
-          : `Paying ${lnaddress}`;
+          ? `Paid to ${lnaddress}: ${description}`
+          : `Paid to ${lnaddress}`;
 
       const r: any = await got(`${callback}?amount=${amount * 1000}`).json();
       if (r.reason) fail(r.reason);
