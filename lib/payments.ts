@@ -1689,26 +1689,33 @@ const finalize = async (r, p) => {
   l("payment completed", p.id, preimage);
 
   const maxfee = p.fee;
-  const { amount_msat, invoice_amount_msat } = await ln.decode(p.hash);
-  l(
-    "finalize",
-    p.id,
-    "amount_sent_msat",
-    r.amount_sent_msat,
-    "invoice_msat",
-    amount_msat || invoice_amount_msat,
-  );
-  p.fee = Math.max(
-    0,
-    Math.round((r.amount_sent_msat - (amount_msat || invoice_amount_msat)) / 1000),
-  );
   p.ref = preimage;
 
-  if (!(await g(`payment:${p.id}`)).ref) {
-    await s(`payment:${p.id}`, p);
+  // Best-effort: compute actual fee from invoice amount vs amount sent.
+  // For open bolt11s (no amount in the invoice — typical for LNURL-pay)
+  // decode returns no amount_msat, so fall back to the debited amount.
+  // Wrap in try so a refund failure can't strand the payment without
+  // notifying the UI — preimage is already in hand.
+  try {
+    const decoded: any = await ln.decode(p.hash);
+    const invoiceMsat =
+      decoded.amount_msat || decoded.invoice_amount_msat || Math.abs(p.amount) * 1000;
+    l("finalize", p.id, "amount_sent_msat", r.amount_sent_msat, "invoice_msat", invoiceMsat);
+    p.fee = Math.max(0, Math.round((r.amount_sent_msat - invoiceMsat) / 1000));
+    if (!Number.isFinite(p.fee)) p.fee = maxfee;
 
-    l("refunding fee", maxfee, p.fee, maxfee - p.fee, p.ref);
-    await tbRefund(p.uid, maxfee - p.fee);
+    if (!(await g(`payment:${p.id}`)).ref) {
+      await s(`payment:${p.id}`, p);
+      l("refunding fee", maxfee, p.fee, maxfee - p.fee, p.ref);
+      await tbRefund(p.uid, maxfee - p.fee);
+    }
+  } catch (e: any) {
+    warn("finalize: fee/refund step failed", p.id, e?.message ?? String(e));
+    // Still persist the preimage so the payment shows as completed even
+    // if the refund step couldn't run.
+    try {
+      if (!(await g(`payment:${p.id}`)).ref) await s(`payment:${p.id}`, p);
+    } catch {}
   }
 
   nwcNotify(p);
