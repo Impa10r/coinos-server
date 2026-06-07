@@ -174,7 +174,6 @@ export async function ensureListenerAlive() {
     listenForLightning();
     return;
   }
-
 }
 
 export async function replay(index) {
