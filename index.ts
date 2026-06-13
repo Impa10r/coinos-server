@@ -1,7 +1,7 @@
 import app, { routeRateLimit } from "$lib/app";
 import { admin, auth, optional } from "$lib/auth";
 
-import { fixBolt12, listenForLightning, ensureListenerAlive, replay } from "$lib/lightning";
+import { fixBolt12, listenForLightning, ensureListenerAlive } from "$lib/lightning";
 import { l } from "$lib/logging";
 import { startHealthCheck } from "$lib/health";
 import { getLocations } from "$lib/locations";
@@ -245,7 +245,10 @@ app.post("/melt", auth, ecash.melt);
 app.post("/ecash/:id", ecash.receive);
 
 app.get("/replay/:index", (c) => {
-  replay(c.req.param("index"));
+  // Unauthenticated ops-only reconciliation trigger — the double-credit race
+  // it could cause is now closed by credit()'s SET NX guard, but there's no
+  // reason to leave it open to the public internet regardless.
+  // replay(c.req.param("index"));
   return c.json({});
 });
 
