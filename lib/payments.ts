@@ -1691,7 +1691,6 @@ const finalize = async (r, p) => {
 
   const maxfee = p.fee;
   p.ref = preimage;
-  p.preimage = preimage; // Ensure preimage is available for frontend & Nostr emit
 
   // Best-effort: compute actual fee from invoice amount vs amount sent.
   // For open bolt11s (no amount in the invoice — typical for LNURL-pay)
