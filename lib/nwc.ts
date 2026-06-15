@@ -331,7 +331,7 @@ const handle = (method, params, ev, app, user) =>
           fee: max_fee > 0 ? max_fee : undefined,
           user,
           pr,
-          memo: JSON.stringify(metadata),
+          memo: metadata && Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : undefined,
           retryFor: 25,
         });
 
