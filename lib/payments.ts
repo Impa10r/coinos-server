@@ -1682,6 +1682,7 @@ export const check = async () => {
 
 const finalize = async (r, p) => {
   let { preimage } = r;
+  if (!preimage) preimage = r.preimage;
   if (!preimage) preimage = r.payment_preimage;
   if (!preimage) fail("missing preimage");
 
