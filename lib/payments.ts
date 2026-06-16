@@ -1686,6 +1686,18 @@ const finalize = async (r, p) => {
   if (!preimage) preimage = r.payment_preimage;
   if (!preimage) fail("missing preimage");
 
+  // Attempt to emit a Nostr Zap receipt if this payment was a NIP-57 zap
+  try {
+    const inv = await getInvoice(p.hash);
+    if (inv) {
+      inv.payment_preimage = preimage;
+      inv.paid_at = Math.floor(Date.now() / 1000);
+      handleZap(inv, p.uid);
+    }
+  } catch (e: any) {
+    warn("failed to emit zap receipt from finalize", p.id, e?.message);
+  }
+
   await db.sRem("pending", p.hash);
   l("payment completed", p.id, preimage);
 
@@ -1720,18 +1732,6 @@ const finalize = async (r, p) => {
   }
 
   nwcNotify(p);
-
-  // Attempt to emit a Nostr Zap receipt if this payment was a NIP-57 zap
-  try {
-    const inv = await getInvoice(p.hash);
-    if (inv) {
-      inv.payment_preimage = preimage;
-      inv.paid_at = Math.floor(Date.now() / 1000);
-      handleZap(inv, p.uid);
-    }
-  } catch (e: any) {
-    warn("failed to emit zap receipt from finalize", p.id, e?.message);
-  }
 
   emit(p.uid, "payment", p);
   return p;
