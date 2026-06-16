@@ -72,7 +72,6 @@ const outLn = {
   },
 };
 import { err, l, warn } from "$lib/logging";
-import { handleZap } from "$lib/nostr";
 import { notify, nwcNotify } from "$lib/notifications";
 import { emit } from "$lib/sockets";
 import { squarePayment } from "$lib/square";
@@ -1096,6 +1095,8 @@ export const sendInternal = async ({
     const inv = invoices[0];
     inv.payment_preimage = p.id;
     inv.paid_at = Math.floor(Date.now() / 1000);
+    // Dynamic import to prevent circular dependency between payments.ts and nostr.ts
+    const { handleZap } = await import("$lib/nostr");  
     handleZap(inv, sender.pubkey).catch(console.log);
   }
 
@@ -1684,18 +1685,25 @@ const finalize = async (r, p) => {
   let { preimage } = r;
   if (!preimage) preimage = r.preimage;
   if (!preimage) preimage = r.payment_preimage;
+
+  // LND fallback often returns base64 preimages or missing preimage fields
+  if (!preimage || (typeof preimage === 'string' && !/^[0-9a-fA-F]{64}$/.test(preimage))) {
+    try {
+      const { pays } = await outLn.listpays(p.hash);
+      const completedPay = pays.find((x) => x.status === "complete");
+      if (completedPay?.preimage) {
+        preimage = completedPay.preimage;
+      }
+    } catch {}
+  }
+
   if (!preimage) fail("missing preimage");
 
-  // Attempt to emit a Nostr Zap receipt if this payment was a NIP-57 zap
-  try {
-    const inv = await getInvoice(p.hash);
-    if (inv) {
-      inv.payment_preimage = preimage;
-      inv.paid_at = Math.floor(Date.now() / 1000);
-      handleZap(inv, p.uid);
-    }
-  } catch (e: any) {
-    warn("failed to emit zap receipt from finalize", p.id, e?.message);
+  // Ensure preimage is a hex string (LND sometimes returns base64)
+  if (typeof preimage === 'string' && !/^[0-9a-fA-F]+$/.test(preimage)) {
+    try {
+      preimage = Buffer.from(preimage, 'base64').toString('hex');
+    } catch {}
   }
 
   await db.sRem("pending", p.hash);
@@ -1703,6 +1711,38 @@ const finalize = async (r, p) => {
 
   const maxfee = p.fee;
   p.ref = preimage;
+  p.preimage = preimage; // Ensure preimage is available for frontend & Nostr emit
+
+  // Attempt to emit a Nostr Zap receipt if this payment was a NIP-57 zap
+  try {
+    let inv = await getInvoice(p.hash);
+    if (!inv) {
+      // Fetch from listpays (CLN/LND) if we don't have it locally
+      try {
+        const { pays } = await outLn.listpays(p.hash);
+        if (pays && pays.length > 0) {
+          const payDetails = pays[0];
+          // Construct a minimal invoice object using the payment details
+          inv = {
+            bolt11: payDetails.bolt11 || p.hash,
+            description: payDetails.description,
+            payment_hash: payDetails.payment_hash,
+          };
+        }
+      } catch {}
+    }
+
+    if (inv) {
+      inv.payment_preimage = preimage;
+      inv.paid_at = Math.floor(Date.now() / 1000);
+
+      // Dynamic import to prevent circular dependency
+      const { handleZap } = await import("$lib/nostr");
+      handleZap(inv, p.uid);
+    }
+  } catch (e: any) {
+    warn("failed to emit zap receipt from finalize", p.id, e?.message);
+  }
 
   // Best-effort: compute actual fee from invoice amount vs amount sent.
   // For open bolt11s (no amount in the invoice — typical for LNURL-pay)
