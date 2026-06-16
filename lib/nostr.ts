@@ -1,5 +1,6 @@
 import config from "$config";
 import { db, g } from "$lib/db";
+import ln from "$lib/ln";
 import { l, warn } from "$lib/logging";
 import { scan } from "$lib/strfry";
 import { fail, fields, getUser, pick } from "$lib/utils";
@@ -37,7 +38,15 @@ export async function publish(ev, url = config.nostr) {
 export async function handleZap(invoice, sender = undefined) {
   try {
     const pubkey = serverPubkey2;
+    const bolt11 = invoice.bolt11;
+
+    // If we don't have the description, decode the BOLT11 string to get it
     let desc = invoice.description;
+    if (!desc && bolt11) {
+      const decoded: any = await ln.decode(bolt11);
+      desc = decoded.description;
+    }
+
     try {
       desc = decodeURIComponent(desc);
     } catch {}
@@ -80,8 +89,8 @@ export async function handleZap(invoice, sender = undefined) {
     if (atag) tags.push(atag);
     if (sender) tags.push(["P", zapreq.pubkey]);
 
-    tags.push(["bolt11", invoice.bolt11]);
-    tags.push(["description", invoice.description]);
+    tags.push(["bolt11", bolt11]);
+    tags.push(["description", desc]);
     tags.push(["preimage", invoice.payment_preimage]);
 
     const ev = { pubkey, kind, created_at, content, tags };
@@ -248,3 +257,4 @@ export const get = async (f) => {
   const events = await q(f);
   return events[0];
 };
+
