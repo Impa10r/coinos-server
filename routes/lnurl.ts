@@ -6,7 +6,8 @@ import { serverPubkey2 } from "$lib/nostr";
 import { getFundBalance, tbFundCredit, tbFundDebit } from "$lib/tb";
 import { SATS, bail, fail, getInvoice, getUser } from "$lib/utils";
 import { bech32 } from "bech32";
-import got from "got";
+import { safeGot } from "$lib/safe-fetch";
+import { verifyEvent } from "nostr-tools";
 import { SocksProxyAgent } from "socks-proxy-agent";
 import { v4 } from "uuid";
 
@@ -57,7 +58,7 @@ export default {
       const opts = proxyAgent
         ? { agent: { http: proxyAgent as any, https: proxyAgent as any } }
         : {};
-      const r = await got(url, opts).json();
+      const r = await safeGot(url, opts);
       return c.json(r);
     } catch (e) {
       warn("lnurl proxy failed", url, e.message);
@@ -71,7 +72,10 @@ export default {
     const url = `https://${domain}/.well-known/lnurlp/${name.toLowerCase().replace(/\s/g, "")}`;
 
     try {
-      const r = (await got(url).json()) as any;
+      const opts = proxyAgent
+        ? { agent: { http: proxyAgent as any, https: proxyAgent as any } }
+        : {};
+      const r = await safeGot(url, opts);
       if (r.tag !== "payRequest") fail("not an ln address");
     } catch {
       const m = `failed to lookup lightning address ${address}`;
@@ -88,7 +92,10 @@ export default {
     try {
       const url = Buffer.from(bech32.fromWords(bech32.decode(text, 20000).words)).toString();
 
-      const r = await got(url).json();
+      const opts = proxyAgent
+        ? { agent: { http: proxyAgent as any, https: proxyAgent as any } }
+        : {};
+      const r = await safeGot(url, opts);
       return c.json(r);
     } catch (e) {
       return bail(c, e.message);
@@ -187,6 +194,10 @@ export default {
       if (nostr) {
         try {
           const event = JSON.parse(decodeURIComponent(nostr));
+          // NIP-57: must be a signed kind-9734 zap request. Reject anything
+          // else so we can't be tricked into storing a forged zap receipt.
+          if (event.kind !== 9734 || !verifyEvent(event))
+            throw new Error("invalid zap request");
           await s(`zap:${id}`, event);
           metadata = decodeURIComponent(nostr);
         } catch (e) {
