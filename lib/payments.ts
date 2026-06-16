@@ -1721,10 +1721,10 @@ const finalize = async (r, p) => {
 
   nwcNotify(p);
 
-  // If this was a Nostr Zap (NIP-57), emit the receipt now that we have the preimage
+  // Attempt to emit a Nostr Zap receipt if this payment was a NIP-57 zap
   try {
     const inv = await getInvoice(p.hash);
-    if (inv?.memo?.includes("9734")) {
+    if (inv) {
       inv.payment_preimage = preimage;
       inv.paid_at = Math.floor(Date.now() / 1000);
       handleZap(inv, p.uid);
