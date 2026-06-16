@@ -1720,6 +1720,19 @@ const finalize = async (r, p) => {
   }
 
   nwcNotify(p);
+
+  // If this was a Nostr Zap (NIP-57), emit the receipt now that we have the preimage
+  try {
+    const inv = await getInvoice(p.hash);
+    if (inv?.memo?.includes("9734")) {
+      inv.payment_preimage = preimage;
+      inv.paid_at = Math.floor(Date.now() / 1000);
+      handleZap(inv, p.uid);
+    }
+  } catch (e: any) {
+    warn("failed to emit zap receipt from finalize", p.id, e?.message);
+  }
+
   emit(p.uid, "payment", p);
   return p;
 };
