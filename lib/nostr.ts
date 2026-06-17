@@ -40,6 +40,8 @@ export async function handleZap(invoice, sender = undefined) {
     const pubkey = serverPubkey2;
     const bolt11 = invoice.bolt11;
 
+    l("zap bolt11:", bolt11)
+
     // If we don't have the description, decode the BOLT11 string to get it
     let desc = invoice.description;
     if (!desc && bolt11) {
