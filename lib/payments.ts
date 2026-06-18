@@ -1188,6 +1188,14 @@ export const sendLightning = async ({
 }) => {
   let p;
 
+  // BOLT11 is case-insensitive, but downstream code is not: the stored payment
+  // hash, the `pending` reconciler entry, and check()'s startsWith("ln") test
+  // all assume lowercase. An uppercase-pasted invoice gets stored uppercase,
+  // then check() treats its pending entry as non-lightning and evicts it
+  // without reversing — a failed send that never gets auto-refunded. Normalize
+  // once, up front, so every downstream use sees the same lowercase form.
+  pr = pr.replace(/\s/g, "").toLowerCase();
+
   if (typeof amount !== "undefined") {
     amount = Number.parseInt(amount);
     if (amount < 0 || amount > SATS || Number.isNaN(amount)) {
@@ -1969,7 +1977,10 @@ export const check = async () => {
     const payments = await db.sMembers("pending");
 
     for (const pr of payments) {
-      if (!String(pr).startsWith("ln")) {
+      // Case-insensitive: an uppercase-pasted invoice ("LNBC…") is still a
+      // lightning payment. Matching case-sensitively here used to evict such
+      // entries without reversing, stranding failed sends with no auto-refund.
+      if (!String(pr).toLowerCase().startsWith("ln")) {
         await db.sRem("pending", pr);
         continue;
       }
