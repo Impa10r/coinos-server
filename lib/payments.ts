@@ -1974,7 +1974,15 @@ export const check = async () => {
         continue;
       }
       const p = await getPayment(pr);
-      if (!p || Date.now() - p.created < 10000) continue;
+      // Skip payments sendLightning may still be actively driving. xpay retries
+      // for 30s (retry_for: 30), during which listpays can momentarily show all
+      // attempts "failed" before the winning part lands. The old 10s threshold
+      // let check() reverse/refund such a payment mid-flight; it then completed,
+      // and sendLightning's finalize threw on the deleted record — refunding a
+      // payment that actually settled (the LEAKED DEBIT losses). Wait well past
+      // the retry window so sendLightning has finished finalize()/reverse() and
+      // removed it from `pending` before check() ever touches it.
+      if (!p || Date.now() - p.created < 60000) continue;
       if (inFlight.has(String(pr))) continue;
       const { pays } = await outLn.listpays(String(pr));
 
@@ -2031,6 +2039,15 @@ const finalize = async (r, p) => {
   p.preimage = preimage; // Ensure preimage is available for frontend & Nostr emit
   // The HTLC settled (we have the preimage) — the send is now fully confirmed.
   p.confirmed = true;
+
+  // The record is gone because a concurrent reverse() already refunded this
+  // payment — yet here we are finalizing it, so it actually COMPLETED on the
+  // network and the refund was wrong (coinos is now short the amount). Do NOT
+  // silently re-create the record; raise a clear, greppable error so the
+  // LEAKED DEBIT guard logs it for manual recovery instead of a cryptic
+  // null-deref. (The check()-window fix above should make this path very rare.)
+  const current = await g(`payment:${p.id}`);
+  if (!current) fail(`finalize: payment ${p.id} reversed-then-completed (double-pay leak)`);
 
   // Attempt to emit a Nostr Zap receipt if this payment was a NIP-57 zap
   try {

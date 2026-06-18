@@ -48,10 +48,10 @@ let entriesRemoved = 0;
 const worst: { key: string; before: number; after: number }[] = [];
 
 for await (const k of db.scanIterator({ MATCH: "*:invoices", COUNT: 2000 })) {
-  const keys = Array.isArray(k) ? k : [k];
+  const keys = (Array.isArray(k) ? k : [k]) as unknown as string[];
   for (const key of keys) {
     lists++;
-    const list = await db.lRange(key, 0, -1);
+    const list = (await db.lRange(key, 0, -1)) as unknown as string[];
     entriesBefore += list.length;
     const deduped = dedupeKeepLast(list);
     const removed = list.length - deduped.length;
