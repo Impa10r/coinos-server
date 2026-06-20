@@ -1733,12 +1733,27 @@ const finalize = async (r, p) => {
     }
 
     if (inv) {
-      inv.payment_preimage = preimage;
-      inv.paid_at = Math.floor(Date.now() / 1000);
+      // Wait for preimage to be fully persisted in the database, just like NWC
+      let savedPreimage;
+      for (let i = 0; i < 70; i++) {
+        const currentP = await g(`payment:${p.id}`);
+        if (currentP?.ref) {
+          savedPreimage = currentP.ref;
+          break;
+        }
+        await sleep(1000);
+      }
 
-      // Dynamic import to prevent circular dependency
-      const { handleZap } = await import("$lib/nostr");
-      handleZap(inv, p.uid);
+      if (savedPreimage) {
+        inv.payment_preimage = savedPreimage;
+        inv.paid_at = Math.floor(Date.now() / 1000);
+
+        // Dynamic import to prevent circular dependency
+        const { handleZap } = await import("$lib/nostr");
+        handleZap(inv, p.uid);
+      } else {
+        warn("failed to emit zap receipt: preimage not found in db after polling", p.id);
+      }
     }
   } catch (e: any) {
     warn("failed to emit zap receipt from finalize", p.id, e?.message);
