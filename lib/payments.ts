@@ -1716,24 +1716,8 @@ const finalize = async (r, p) => {
   // Attempt to emit a Nostr Zap receipt if this payment was a NIP-57 zap
   try {
     let inv = await getInvoice(p.hash);
-    if (!inv) {
-      // Fetch from listpays (CLN/LND) if we don't have it locally
-      try {
-        const { pays } = await outLn.listpays(p.hash);
-        if (pays && pays.length > 0) {
-          const payDetails = pays[0];
-          // Construct a minimal invoice object using the payment details
-          inv = {
-            bolt11: payDetails.bolt11 || p.hash,
-            description: payDetails.description,
-            payment_hash: payDetails.payment_hash,
-          };
-        }
-      } catch {}
-    }
-
-    if (inv) {
-      inv.payment_preimage = preimage; // already resolved above
+    if (inv?.memo?.includes("9734")) {
+      inv.payment_preimage = preimage;
       inv.paid_at = Math.floor(Date.now() / 1000);
       const { handleZap } = await import("$lib/nostr");
       try {
