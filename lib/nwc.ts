@@ -338,9 +338,9 @@ const handle = (method, params, ev, app, user) =>
         await db.lPush(`${pubkey}:payments`, pid);
 
         // The preimage is attached asynchronously by the payment finalizer.
-        // Poll the payment for up to 70 seconds to resolve the race condition
+        // Poll the payment for up to 100 seconds to resolve the race condition
         // where NWC asks for the preimage before finalization has saved it.
-        for (let i = 0; i < 70; i++) {
+        for (let i = 0; i < 100; i++) {
           const p = await g(`payment:${pid}`);
           if (p?.ref) return result({ preimage: p.ref });
           await sleep(1000);
