@@ -171,7 +171,7 @@ export default () => {
         }
         const { params, method } = JSON.parse(decrypted);
 
-        l("nwc method", method, "pubkey", pubkey.slice(0, 8));
+        l("nwc method", method, "pubkey", pubkey.slice(0, 8), "params", JSON.stringify(params));
 
         if (!methods.includes(method)) return;
 
