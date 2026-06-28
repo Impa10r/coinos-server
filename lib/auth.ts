@@ -34,8 +34,12 @@ const authenticate = async (c) => {
       user &&
       ((await db.sIsMember("evicted", user.id)) ||
         (await db.sIsMember("evicted", user.username?.toLowerCase?.().trim())))
-    )
+    ) {
+      // Distinctive, greppable line carrying the real source IP so the realtime
+      // auto-banner (scripts/atk-autoban.sh) can insta-ban it at Cloudflare.
+      console.error(`EVICTED_AUTH ${user.username} ${c.req.header("cf-connecting-ip")}`);
       return null;
+    }
 
     return user;
   } catch {
