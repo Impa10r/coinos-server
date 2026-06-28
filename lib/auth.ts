@@ -1,4 +1,5 @@
 import config from "$config";
+import { db } from "$lib/db";
 import { fail, getUser } from "$lib/utils";
 import jwt from "jsonwebtoken";
 import { getCookie } from "hono/cookie";
@@ -22,7 +23,21 @@ const authenticate = async (c) => {
     const wl = { GET: ["/invoice", "/payments"], POST: ["/invoice"] };
     if (id.endsWith("-ro") && wl[method]?.some((p) => url.startsWith(p))) id = id.slice(0, -3);
 
-    return await getUser(id);
+    const user = await getUser(id);
+
+    // Hard eviction: an account in the `evicted` set cannot authenticate AT ALL
+    // — every request, every endpoint — regardless of source IP/VPN. Unlike the
+    // `blacklist` freeze (which only blocks sends), this kills the value of a
+    // compromised/attacker JWT outright. Match on the immutable uid OR username
+    // so a rename can't shake it.
+    if (
+      user &&
+      ((await db.sIsMember("evicted", user.id)) ||
+        (await db.sIsMember("evicted", user.username?.toLowerCase?.().trim())))
+    )
+      return null;
+
+    return user;
   } catch {
     return null;
   }

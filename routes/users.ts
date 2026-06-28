@@ -960,10 +960,11 @@ export default {
       // identical to an unregistered route — previously it returned "disabled",
       // which confirmed the endpoint AND its admin-gating to attackers.
       if (u?.username !== config.admin) {
-        err("password reset failed disabled", req.headers["cf-connecting-ip"]);
-        return res
-          .code(404)
-          .send({ message: "Route POST:/reset not found", error: "Not Found", statusCode: 404 });
+        err("password reset failed disabled", c.req.header("cf-connecting-ip"));
+        return c.json(
+          { message: "Route POST:/reset not found", error: "Not Found", statusCode: 404 },
+          404,
+        );
       }
       id = await g(`user:${username.toLowerCase().replace(/\s/g, "")}`);
       user = await g(`user:${id}`);
