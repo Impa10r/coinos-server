@@ -801,7 +801,7 @@ export default {
       let p;
       if (payee === id) {
         p = await debit({ hash: pr, amount, memo, user });
-        await credit({ hash: pr, amount, memo, ref: user.id });
+        await credit({ hash: pr, amount, memo, ref: user.id, tip: p.tip });
       } else p = await sendLightning({ user, pr, amount, fee, memo });
 
       return c.json(p);
