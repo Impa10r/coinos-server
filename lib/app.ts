@@ -119,6 +119,17 @@ if (prod) {
   }, 5000);
 }
 
+// Never log plaintext passwords. Redact password fields from request bodies
+// before they reach the request log.
+const REDACT_FIELDS = ["password", "confirm"];
+const redactBody = (body: any) => {
+  if (!body || typeof body !== "object") return body;
+  const copy: any = { ...body };
+  for (const field of REDACT_FIELDS)
+    if (field in copy) copy[field] = "[redacted]";
+  return copy;
+};
+
 // Request logging
 app.use("*", async (c, next) => {
   const start = Date.now();
@@ -160,7 +171,7 @@ app.use("*", async (c, next) => {
       url,
       ip,
       query: c.req.query(),
-      body,
+      body: redactBody(body),
       user: (c.get("user" as never) as any)?.username,
     });
   }
