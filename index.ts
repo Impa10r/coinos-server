@@ -83,8 +83,18 @@ app.get(
   invoices.get,
 );
 app.get("/invoices", auth, invoices.list);
-app.post("/invoice", { ...optional, config: { rateLimit: { max: 30, timeWindow: 10000, keyGenerator: (req) => `invoicecreate:${(req.headers["cf-connecting-ip"] as string) || req.ip}` } } }, invoices.create);
-app.post("/invoice/:id", { ...optional, config: { rateLimit: { max: 30, timeWindow: 10000, keyGenerator: (req) => `invoiceupdate:${(req.headers["cf-connecting-ip"] as string) || req.ip}` } } }, invoices.update);
+app.post(
+  "/invoice",
+  optional,
+  routeRateLimit({ max: 30, windowMs: 10000, keyPrefix: "invoicecreate" }),
+  invoices.create,
+);
+app.post(
+  "/invoice/:id",
+  optional,
+  routeRateLimit({ max: 30, windowMs: 10000, keyPrefix: "invoiceupdate" }),
+  invoices.update,
+);
 app.post("/sign", auth, invoices.sign);
 
 app.get("/preimages", auth, preimages.list);
