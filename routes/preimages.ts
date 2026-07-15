@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { db } from "$lib/db";
+import { db, g } from "$lib/db";
 import { parseEntry } from "$lib/invoices";
 import { bail, fail } from "$lib/utils";
 
@@ -7,9 +7,10 @@ import { bail, fail } from "$lib/utils";
 // with usePreimage: true — each such invoice consumes the next queued preimage
 // so its payment hash is sha256(preimage). Once paid, the preimage is exposed
 // on the invoice record, letting a static storefront sell decryption secrets
-// with no backend of its own. An optional per-batch price (sats) is enforced
-// at invoice creation — invoice creation is unauthenticated, so without it a
-// buyer could name their own price for the secret.
+// with no backend of its own. An optional per-batch price — sats, or a fiat
+// amount converted at invoice-creation time — is enforced at invoice creation;
+// creation is unauthenticated, so without it a buyer could name their own
+// price for the secret.
 
 const MAX_QUEUE = 1000;
 const key = (uid) => `${uid}:preimages`;
@@ -18,7 +19,11 @@ const sha256 = (hex: string) => createHash("sha256").update(hex, "hex").digest("
 export default {
   async add(c) {
     try {
-      const { preimages, price = null } = await c.req.json();
+      const { preimages, price = null, fiat = null, currency: reqCurrency = null } =
+        await c.req.json();
+      let currency = reqCurrency;
+      const user = c.get("user");
+
       if (!Array.isArray(preimages) || !preimages.length)
         fail("preimages array required");
       if (
@@ -27,10 +32,20 @@ export default {
         )
       )
         fail("preimages must be 64-character hex strings");
+      if (price !== null && fiat !== null)
+        fail("specify price (sats) or fiat, not both");
       if (price !== null && (!Number.isInteger(price) || price <= 0))
         fail("price must be a positive integer amount of sats");
+      if (fiat !== null) {
+        if (typeof fiat !== "number" || !(fiat > 0))
+          fail("fiat must be a positive number");
+        currency ||= user.currency;
+        const rates = await g("rates");
+        if (!rates?.[currency]) fail(`unsupported currency ${currency}`);
+      } else {
+        currency = null;
+      }
 
-      const user = c.get("user");
       const k = key(user.id);
       const existing = (await db.lRange(k, 0, -1)) as unknown as string[];
       const seen = new Set(existing.map((e) => parseEntry(e).preimage));
@@ -47,7 +62,9 @@ export default {
       if (fresh.length)
         await db.rPush(
           k,
-          fresh.map((preimage) => JSON.stringify({ preimage, price })),
+          fresh.map((preimage) =>
+            JSON.stringify({ preimage, price, fiat, currency }),
+          ),
         );
 
       return c.json({
@@ -56,6 +73,8 @@ export default {
           preimage,
           hash: sha256(preimage),
           price,
+          fiat,
+          currency,
         })),
       });
     } catch (e) {
@@ -70,8 +89,8 @@ export default {
       return c.json({
         queued: entries.length,
         preimages: entries.map((e) => {
-          const { preimage, price } = parseEntry(e);
-          return { preimage, hash: sha256(preimage), price };
+          const { preimage, price, fiat, currency } = parseEntry(e);
+          return { preimage, hash: sha256(preimage), price, fiat, currency };
         }),
       });
     } catch (e) {
