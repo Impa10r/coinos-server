@@ -161,7 +161,7 @@ export const debit = async ({
   const skipServerLimit = type === PaymentType.fund || type === PaymentType.internal;
 
   if (
-    frozen ||
+    frozen && !whitelisted ||
     (userLimit != null && amount > userLimit && !whitelisted) ||
     (!skipServerLimit && serverLimit != null && amount > serverLimit)
   ) {
