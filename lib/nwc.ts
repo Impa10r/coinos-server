@@ -245,6 +245,9 @@ const handle = (method, params, ev, app, user) =>
   ({
     async pay_invoice() {
       const { invoice: pr, metadata } = params;
+
+      if (!pr) return error({ code: "OTHER", message: "invoice is required" });
+      
       const { amount_msat, payee } = await ln.decode(pr);
       const { id } = await ln.getinfo();
       const amount = Math.round(amount_msat / 1000);
