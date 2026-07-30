@@ -4,11 +4,11 @@ import ln from "$lib/ln";
 import { err, l, warn } from "$lib/logging";
 import { mail, templates } from "$lib/mail";
 import mqtt from "$lib/mqtt";
-import { publish, serverSecret2 } from "$lib/nostr";
+import { encryptPayload, publish, serverSecret2 } from "$lib/nostr";
 import { emit } from "$lib/sockets";
 import { f, fiat, fmt, getUser, link, nada, t } from "$lib/utils";
 import { hexToBytes } from "@noble/hashes/utils.js";
-import { finalizeEvent, nip04 } from "nostr-tools";
+import { finalizeEvent } from "nostr-tools";
 import webpush from "web-push";
 
 if (config.vapid) {
@@ -79,14 +79,17 @@ export const nwcNotify = async (p) => {
     const user = await getUser(p.uid);
     const pubkeys = await db.sMembers(`${user.id}:apps`);
     if ((pubkeys as any).length) {
-      let payment_hash = "";
-      if (p.type === "lightning") {
+      let payment_hash = p.payment_hash || "";
+      if (!payment_hash && (p.type === "lightning" || p.type === "bolt12")) {
         try {
-          if (p.amount < 0) {
+          if (p.amount < 0 && p.type === "lightning") {
             const { pays } = await ln.listpays({ bolt11: p.hash });
             payment_hash = pays[0]?.payment_hash || "";
           } else {
-            ({ payment_hash } = await ln.decode(p.hash));
+            const d = await ln.decode(p.hash);
+            // bolt11 decodes expose payment_hash, bolt12 invoices
+            // invoice_payment_hash
+            payment_hash = d.payment_hash || d.invoice_payment_hash || "";
           }
         } catch {}
       }
@@ -113,18 +116,30 @@ export const nwcNotify = async (p) => {
           notification,
         });
 
-        const content = nip04.encrypt(serverSecret2 as any, pubkey as string, payload);
+        // NIP-47: a wallet supporting both schemes publishes each notification
+        // twice — kind 23196 nip04-encrypted, kind 23197 nip44-encrypted
+        for (const [scheme, kind] of [
+          ["nip04", 23196],
+          ["nip44_v2", 23197],
+        ] as const) {
+          const content = await encryptPayload(
+            scheme,
+            serverSecret2,
+            pubkey,
+            payload,
+          );
 
-        const unsigned = {
-          content,
-          tags: [["p", pubkey]],
-          kind: 23196,
-          created_at: Math.floor(Date.now() / 1000),
-        };
+          const unsigned = {
+            content,
+            tags: [["p", pubkey]],
+            kind,
+            created_at: Math.floor(Date.now() / 1000),
+          };
 
-        const event = finalizeEvent(unsigned as any, hexToBytes(serverSecret2));
+          const event = finalizeEvent(unsigned as any, hexToBytes(serverSecret2));
 
-        publish(event).catch(nada);
+          publish(event).catch(nada);
+        }
       }
     }
   } catch (e) {

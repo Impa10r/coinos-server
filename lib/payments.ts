@@ -1201,6 +1201,7 @@ export const sendLightning = async ({
   fee = undefined,
   memo = undefined,
   retryFor = undefined,
+  payerNote = undefined,
 }) => {
   let p;
 
@@ -1225,7 +1226,29 @@ export const sendLightning = async ({
   const whitelisted = await db.sIsMember("whitelist", user?.username?.toLowerCase().trim());
   if (typeof retryFor === "undefined") retryFor = whitelisted ? 30 : 60;
 
-  let { type, invoice_amount_msat, amount_msat, invoice_node_id, payee } = await ln.decode(pr);
+  let decoded = await ln.decode(pr);
+
+  // A bolt12 offer (lno1...) isn't payable directly — fetch a real invoice
+  // from it over onion messages, then pay that. payerNote rides along in
+  // invreq_payer_note (NIP-177 bolt12 zaps put nostr:nip177:<intent-id> there).
+  if (decoded.type === "bolt12 offer") {
+    if (decoded.offer_currency)
+      fail("Currency-denominated offers are not supported");
+    if (!decoded.offer_amount_msat && !amount) fail("Amount required");
+
+    const { invoice } = await ln.fetchinvoice({
+      offer: pr,
+      amount_msat: decoded.offer_amount_msat ? undefined : amount * 1000,
+      payer_note: payerNote,
+      timeout: 60,
+    });
+
+    pr = invoice.replace(/\s/g, "").toLowerCase();
+    decoded = await ln.decode(pr);
+  }
+
+  let { type, invoice_amount_msat, amount_msat, invoice_node_id, payee } =
+    decoded;
   if (type.includes("bolt12")) {
     amount_msat = invoice_amount_msat;
     payee = invoice_node_id;
