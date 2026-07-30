@@ -89,7 +89,7 @@ services:
       start_period: 60s
     restart: always
   clb:
-    image: elementsproject/lightningd:v25.05
+    image: ghcr.io/coinos/lightningd:v26.06.2
     container_name: clb
     environment:
       LIGHTNINGD_NETWORK: regtest
@@ -97,7 +97,7 @@ services:
       - ./data/lightningb:/root/.lightning
     restart: always
   clc:
-    image: elementsproject/lightningd:v25.05
+    image: ghcr.io/coinos/lightningd:v26.06.2
     container_name: clc
     environment:
       LIGHTNINGD_NETWORK: regtest
