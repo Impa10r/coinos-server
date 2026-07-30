@@ -66,6 +66,10 @@ export default {
     bitcoin: 0.004,   // 0.4%
     liquid: 0.001,    // 0.1%
     lightning: 0.001, // 0.1%
+    // Elevated lightning rate for accounts flagged `ln:nofree:<uid>` (see
+    // lib/payments.ts debit/credit) — high-throughput pass-through usage that
+    // would otherwise rebalance channels for free at the standard rate.
+    lightningHigh: 0.002, // 0.2%
     usdt: 0.0015,     // 0.15%
   },
   // SECURITY: the admin login path is disabled when this is empty (fails

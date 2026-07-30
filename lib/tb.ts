@@ -1,4 +1,5 @@
 import config from "$config";
+import { g } from "$lib/db";
 import { warn } from "$lib/logging";
 import { createClient, CreateAccountError, AccountFlags, TransferFlags } from "tigerbeetle-node";
 import { createHash } from "crypto";
@@ -358,9 +359,17 @@ export async function tbCredit(
     timestamp: 0n,
   });
 
+  // Lightning FREE TIER: a lightning (incl. bolt12) receipt accrues a fee
+  // credit — so a normal deposit+withdraw is free — UNLESS this account is
+  // flagged as a high-throughput pass-through (using us to rebalance channels
+  // for free). ln-freetier-monitor.ts sets `ln:nofree:<uid>` from a 30-day
+  // round-trip analysis. It's behavioral + per-account, so it can't be dodged
+  // by splitting across sockpuppets: every puppet that rebalances gets flagged.
+  const noFreeTier = creditType === "lightning" && (await g(`ln:nofree:${uid}`));
+
   // Add fee credit if applicable - MICROSATS for sub-satoshi precision!
   // e.g., 2% of 10 sats = 0.2 sats = 200,000 microsats (accumulates over time)
-  if (creditType && creditLedger[creditType] && config.fee[creditType]) {
+  if (creditType && creditLedger[creditType] && config.fee[creditType] && !noFreeTier) {
     const creditAmountMicro = BigInt(Math.round(amount * MSATS_NUM * config.fee[creditType]));
     if (creditAmountMicro > 0n) {
       transfers.push({

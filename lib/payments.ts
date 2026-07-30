@@ -86,7 +86,7 @@ const outLn = {
     return result;
   },
 };
-import { err, l, warn } from "$lib/logging";
+import { err, l, shortError, warn } from "$lib/logging";
 import { notify, nwcNotify } from "$lib/notifications";
 import { emit } from "$lib/sockets";
 import { squarePayment } from "$lib/square";
@@ -302,15 +302,37 @@ export const debit = async ({
     }
   }
 
-  const tip = Number.parseInt(invoice?.tip) || null;
+  // Capture the tip ONCE, and only for INTERNAL payments — where credit() pays
+  // the invoice owner the same tip (sendInternal passes p.tip through). External
+  // sends (bitcoin/liquid/lightning/bolt12/fund) must NOT inherit a tip: the
+  // destination `hash` can coincidentally match another user's deposit invoice,
+  // which would otherwise pull that stranger's tip into this debit's balance
+  // check and stored record (the LiquidNode negative-balance vector). This one
+  // captured value feeds the ourfee calc, the atomic debit, and the record, so
+  // the record can never disagree with what was actually debited.
+  const tip =
+    type === PaymentType.internal ? Number.parseInt(invoice?.tip) || null : null;
   if (tip < 0) fail("Invalid tip");
 
   if (!amount || amount < 0) fail("Amount must be greater than zero");
 
   let creditType = type;
   if (creditType === PaymentType.bolt12) creditType = PaymentType.lightning;
+
+  // High-throughput pass-through accounts (flagged `ln:nofree` by
+  // ln-freetier-monitor.ts) pay an elevated platform fee on lightning
+  // withdrawals; everyone else pays the standard rate. Flagged accounts already
+  // accrue no free-tier credit, so this rate is what they actually pay.
+  let feeRate = config.fee[creditType];
+  if (
+    creditType === PaymentType.lightning &&
+    aid === uid &&
+    (await g(`ln:nofree:${uid}`))
+  )
+    feeRate = config.fee.lightningHigh;
+
   let ourfee: any = [PaymentType.bitcoin, PaymentType.liquid, PaymentType.lightning].includes(type)
-    ? Math.round((amount + fee + tip) * config.fee[creditType])
+    ? Math.round((amount + fee + tip) * feeRate)
     : 0;
 
   if (creditTypeOverride) creditType = creditTypeOverride;
@@ -331,6 +353,17 @@ export const debit = async ({
   );
 
   if (ourfee.err) fail(ourfee.err);
+
+  // Defense-in-depth: the DEBIT lua rejects overdrafts, so a negative balance
+  // here means the invariant was violated by a mismatched input or a non-lua
+  // balance write. Log loudly with full context so the exact vector is greppable
+  // (SECURITY: negative balance) instead of surfacing days later as a stuck
+  // negative account.
+  const postBal = Number.parseInt(String((await db.get(`balance:${aid}`)) ?? "0"));
+  if (postBal < 0)
+    err(
+      `SECURITY: negative balance ${postBal} after debit user=${user?.username} aid=${aid} amount=${amount} tip=${tip} fee=${fee} ourfee=${ourfee} type=${type} hash=${hash}`,
+    );
 
   const id = v4();
   const p = {
@@ -601,7 +634,7 @@ export const completePayment = async (inv, p, user) => {
         }
       } catch (e) {
         withdrawal = { failed: true };
-        warn(username, "autowithdraw failed", e.message);
+        warn(username, "autowithdraw failed", shortError(e.message));
       }
     }
   }
@@ -875,15 +908,25 @@ export const sendOnchain = async (params) => {
   const isBitcoin = type === PaymentType.bitcoin;
   let { txid } = tx;
   let sendLockKey: string | undefined;
+  let locked = false;
 
   try {
-    // Reserve UTXOs to keep concurrent sends from selecting the same inputs.
-    // Released in the catch block on failure; spent UTXOs make the lock moot on success.
-    try {
-      const lockVin = tx.vin.map(({ txid, vout }) => ({ txid, vout }));
-      if (lockVin.length) await node.lockUnspent(false, lockVin);
-    } catch (e: any) {
-      warn("lockUnspent failed", e.message);
+    // Reserve the exact inputs this tx spends. If locking fails, bitcoind is
+    // telling us an input is no longer unspent ("expected unspent output") —
+    // another send already committed it in the gap between build() (coin
+    // selection) and here. Broadcasting anyway would double-spend, and the
+    // higher-fee tx wins, silently losing the loser's funds (the replaced-tx
+    // incident). So abort hard rather than warn-and-continue; the debit hasn't
+    // happened yet and build() will pick fresh inputs on retry.
+    const lockVin = tx.vin.map(({ txid, vout }) => ({ txid, vout }));
+    if (lockVin.length) {
+      try {
+        await node.lockUnspent(false, lockVin);
+        locked = true;
+      } catch (e: any) {
+        warn("lockUnspent failed, aborting send", e.message);
+        fail("Selected inputs are no longer available, please retry");
+      }
     }
 
     if (!signed) {
@@ -1020,11 +1063,14 @@ export const sendOnchain = async (params) => {
     return p;
   } catch (e) {
     if (sendLockKey) await db.del(sendLockKey);
-    // Release UTXOs that build() locked, so the user can retry without abandoning coins.
-    try {
-      const vin = tx?.vin?.map(({ txid, vout }) => ({ txid, vout })) ?? [];
-      if (vin.length) await node.lockUnspent(true, vin);
-    } catch {}
+    // Release UTXOs only if WE locked them, so we don't accidentally free
+    // another concurrent send's reservation on a shared input.
+    if (locked) {
+      try {
+        const vin = tx?.vin?.map(({ txid, vout }) => ({ txid, vout })) ?? [];
+        if (vin.length) await node.lockUnspent(true, vin);
+      } catch {}
+    }
     throw e;
   }
 };
@@ -1144,6 +1190,11 @@ export const sendKeysend = async ({
       label: hash,
       extratlvs,
     });
+    warn("keysend returned", p.id, JSON.stringify({
+      status: r?.status,
+      has_preimage: !!(r?.payment_preimage ?? r?.preimage),
+      amount_sent_msat: r?.amount_sent_msat,
+    }));
     // Debit created this payment as confirmed:false (in-flight, same as any
     // other lightning send) — flip it now that keysend has settled, or it
     // would show "pending" forever despite having succeeded.
@@ -1153,7 +1204,8 @@ export const sendKeysend = async ({
       warnThrottled("keysend: finalize failed", e?.message ?? String(e));
     }
     return r;
-  } catch (e) {
+  } catch (e: any) {
+    err("failed keysend", hash?.slice(0,16), "error:", shortError(e?.message));
     try {
       if (startIndex === undefined) {
         // Couldn't establish the index baseline, so we can't bound the search.
@@ -1342,8 +1394,8 @@ const completeLightningInBackground = async ({
       warn("xpay returned failed_parts without throwing", p.id, r.failed_parts);
       throw new Error("xpay reported failed_parts with no preimage");
     }
-  } catch {
-    err("failed to pay", pr.substr(-8));
+  } catch (e: any) {
+    err("failed to pay", pr.substr(-8), "xpay error:", shortError(e?.message));
 
     // Before reversing, double-check whether the payment actually settled
     // on the LN network. xpay may throw on timeout while the HTLC still
@@ -2154,7 +2206,13 @@ export const reverse = async (p) => {
 
   const total = Math.abs(p.amount) + p.fee + p.ourfee;
   const ourfee = p.ourfee || 0;
-  const credit = Math.round(total * config.fee[PaymentType.lightning]) - ourfee;
+  // Restore the free-tier credit consumed at debit time. Use the SAME rate the
+  // send was charged at — flagged `ln:nofree` accounts were charged the elevated
+  // rate, so reversing with the standard rate would push their credit negative.
+  const rate = (await g(`ln:nofree:${p.uid}`))
+    ? config.fee.lightningHigh
+    : config.fee.lightning;
+  const credit = Math.round(total * rate) - ourfee;
 
   l("reversing", p.id, p.amount, p.fee, total, ourfee, credit);
 
@@ -2180,6 +2238,12 @@ export const reverse = async (p) => {
 };
 
 const freezeCheck = async () => {
+ // Crash-resilient loop: ANY error in the body (an unhandled rejection in the
+ // limit-write section, a stuck withLimitLock, etc.) used to escape here and
+ // kill the loop silently (the global unhandledRejection handler is a no-op),
+ // freezing every ${type}:limit until someone noticed sends failing. Wrap the
+ // whole body so errors are logged and the next tick is ALWAYS scheduled.
+ try {
   // Each asset is fetched independently so e.g. lq being unreachable doesn't
   // prevent lightning and bitcoin limits from refreshing.
   let lnbalance: number | undefined;
@@ -2232,8 +2296,11 @@ const freezeCheck = async () => {
       await s("liquid:limit", Math.max(lqbalance - lqthreshold, 0));
     });
   }
-
-  setTimeout(freezeCheck, 10000);
+ } catch (e: any) {
+   warn("freezeCheck: iteration failed, will retry next tick:", e?.message ?? String(e));
+ } finally {
+   setTimeout(freezeCheck, 10000);
+ }
 };
 setTimeout(freezeCheck, 10_000);
 
