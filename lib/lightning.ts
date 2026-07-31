@@ -91,17 +91,24 @@ export async function listenForLightning() {
       if (p) return warn("already processed", bolt11 || bolt12);
 
       if (invoice?.memo) {
+        // A non-JSON description just means this isn't a zap (the common case) —
+        // skip silently. Only a real kind-9734 zap request that fails to process
+        // is worth a warning. (The old `!includes("Unexpected")` guard was V8's
+        // parse-error wording; Bun's is "Unable to parse JSON string", so every
+        // non-zap memo'd invoice slipped through and spammed this warning.)
+        let desc = description;
         try {
-          let desc = description;
+          desc = decodeURIComponent(desc);
+        } catch {}
+        let zapreq;
+        try { zapreq = JSON.parse(desc); } catch { zapreq = null; }
+        if (zapreq?.kind === 9734) {
           try {
-            desc = decodeURIComponent(desc);
-          } catch {}
-          if (JSON.parse(desc).kind === 9734) {
             const { pubkey } = await getUser(invoice.uid);
             handleZap(inv, pubkey);
+          } catch (e) {
+            warn("failed to handle zap", e.message);
           }
-        } catch (e) {
-          if (!e.message.includes("Unexpected")) warn("failed to handle zap", e.message);
         }
       }
 
@@ -214,13 +221,19 @@ export async function replay(index) {
     if (p) return warn("already processed", bolt11 || bolt12);
 
     if (invoice?.memo) {
-      try {
-        if (JSON.parse(description).kind === 9734) {
+      // Non-JSON description = not a zap (common case); skip silently. Only a
+      // real kind-9734 zap request that fails processing warrants a warning.
+      // (The old `!includes("Unexpected")` guard was V8 wording; Bun's parse
+      // error is "Unable to parse JSON string", so non-zaps spammed the warning.)
+      let zapreq;
+      try { zapreq = JSON.parse(description); } catch { zapreq = null; }
+      if (zapreq?.kind === 9734) {
+        try {
           const { pubkey } = await getUser(invoice.uid);
           handleZap(inv, pubkey);
+        } catch (e) {
+          warn("failed to handle zap", e.message);
         }
-      } catch (e) {
-        if (!e.message.includes("Unexpected")) warn("failed to handle zap", e.message);
       }
     }
 
