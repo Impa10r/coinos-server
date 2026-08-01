@@ -408,27 +408,48 @@ export default {
         const { currency, fiat } = authorization;
         amount = Math.min(amount, sats(fiat / rates[currency]));
 
-        const sender = await getUser(authorization.uid);
-        authorization.claimed = true;
-        await s(`authorization:${authId}`, authorization);
-
-        const { hash } = await generate({
-          invoice: { amount, type: "lightning" },
-          user: sender,
+        // Atomic single-use claim. The read above is not a lock: concurrent
+        // POST /take for the same authorization all pass the `!claimed` gate and,
+        // without an atomic gate, each would debit the authorizer and fund the
+        // pool — redeeming a single-use authorization N times (COINOS-3). SET NX
+        // lets exactly one caller win the claim; the rest skip the funding.
+        const claimed = await db.set(`authorization:${authId}:claimed`, user.id, {
+          NX: true,
         });
+        if (claimed) {
+          // Mark the record claimed only once the funding has actually landed,
+          // and release the claim if it throws — otherwise a failed funding
+          // (an insufficient balance, a server limit) burns the authorization
+          // permanently: the key is set, the fund never gets the money, and
+          // every later /take skips the funding block.
+          try {
+            const sender = await getUser(authorization.uid);
 
-        const { id: pid } = await debit({
-          hash,
-          amount,
-          memo: id,
-          user: sender,
-          type: PaymentType.fund,
-        });
+            const { hash } = await generate({
+              invoice: { amount, type: "lightning" },
+              user: sender,
+            });
 
-        await tbFundCredit(id, amount);
-        await db.lPush(`fund:${id}:payments`, pid);
-        await db.sAdd(`user:${sender.id}:funds`, id);
-        l("funded fund", id);
+            const { id: pid } = await debit({
+              hash,
+              amount,
+              memo: id,
+              user: sender,
+              type: PaymentType.fund,
+            });
+
+            await tbFundCredit(id, amount);
+            await db.lPush(`fund:${id}:payments`, pid);
+            await db.sAdd(`user:${sender.id}:funds`, id);
+
+            authorization.claimed = true;
+            await s(`authorization:${authId}`, authorization);
+            l("funded fund", id);
+          } catch (e) {
+            await db.del(`authorization:${authId}:claimed`);
+            throw e;
+          }
+        }
       }
 
       const managers = [...(await db.sMembers(`fund:${id}:managers`))];
