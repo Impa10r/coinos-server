@@ -884,6 +884,18 @@ export const sendUsdt = async ({ address, amount, user }) => {
   return p;
 };
 
+// Throttled warn — emit at most once per WARN_THROTTLE_MS per (key, message) pair
+// so a downed external service doesn't flood the log every loop tick.
+const WARN_THROTTLE_MS = 5 * 60 * 1000;
+const warnLastEmitted: Record<string, number> = {};
+const warnThrottled = (key: string, message: string) => {
+  const k = `${key}|${message}`;
+  const now = Date.now();
+  if ((warnLastEmitted[k] || 0) + WARN_THROTTLE_MS > now) return;
+  warnLastEmitted[k] = now;
+  warn(`${key}:`, message);
+};
+
 export const sendKeysend = async ({
   hash,
   amount,
@@ -907,18 +919,78 @@ export const sendKeysend = async ({
     type: PaymentType.lightning,
   });
 
+  let outcome = "unknown";
+
+  // COINOS-1: keysend randomizes its payment hash (the CLN command takes no
+  // preimage arg) and a throw yields no result object, so the caller-supplied
+  // `hash` is NOT the payment's real hash — verifying with it is what made the
+  // old code reverse on every throw. CLN keysend errors carry no payment_hash
+  // either (verified on v26.06.2: the error is {code, message, attempts}).
+  //
+  // Instead, tag the payment with our own unique `label` and note where the
+  // sendpays index stands beforehand. `wait sendpays created 0` returns the
+  // current index immediately, so on a throw we can list only sendpays created
+  // since — no full scan — and find ours by label regardless of error shape.
+  // `wait` isn't in the rpc client's generated method list, so go through the
+  // generic call(). nextvalue 0 never blocks — it returns the current index.
+  let startIndex: number | undefined;
+  try {
+    const w = await ln.call("wait", {
+      subsystem: "sendpays",
+      indexname: "created",
+      nextvalue: 0,
+    });
+    startIndex = w?.created;
+  } catch (e: any) {
+    warnThrottled("keysend: wait sendpays unavailable", e?.message ?? String(e));
+  }
+
   try {
     return await outLn.keysend({
       destination: pubkey,
       amount_msat: amount * 1000,
       maxfee: fee * 1000,
-      retry_for: 20,
+      retry_for: 10,
+      label: hash,
       extratlvs,
     });
   } catch (e) {
     try {
-      await reverse(p);
-    } catch {}
+      if (startIndex === undefined) {
+        // Couldn't establish the index baseline, so we can't bound the search.
+        // Never refund a payment that may have settled — leave the debit.
+        warn("keysend threw with no sendpays baseline — NOT reversing (manual review)", p.id, pubkey);
+        outcome = "unverified-after-keysend-throw (not reversed)";
+      } else {
+        const { payments = [] } = await ln.listsendpays({
+          index: "created",
+          start: startIndex,
+        });
+        const ours = payments.filter((x: any) => x.label === hash);
+        warn("sendpays after keysend-threw", p.id, JSON.stringify(ours.map((x: any) => ({ status: x.status }))));
+
+        if (ours.some((x: any) => x.status === "complete")) {
+          // Settled despite the throw — reversing here is the drain.
+          outcome = "keysend-completed-despite-throw";
+        } else if (!ours.length) {
+          // CLN records a sendpay BEFORE it sends the HTLC, so no record at all
+          // means nothing left the node (the common no-route/no-path failure).
+          // Safe — and necessary — to refund.
+          await reverse(p);
+          outcome = "reversed-after-keysend-throw (no htlc sent)";
+        } else if (ours.every((x: any) => x.status === "failed")) {
+          await reverse(p);
+          outcome = "reversed-after-keysend-throw (confirmed failed)";
+        } else {
+          // Still in flight: CLN may yet settle it, so leave the debit.
+          outcome = "pending-after-keysend-throw";
+        }
+      }
+    } catch (verifyErr: any) {
+      warnThrottled("sendpays verification failed (keysend)", verifyErr?.message ?? String(verifyErr));
+      outcome = "verify-failed-after-keysend-throw";
+    }
+    warn("sendKeysend outcome", p.id, "=", outcome);
     throw e;
   }
 };
