@@ -657,7 +657,7 @@ const handle = (method, params, ev, app, user) =>
       const { pubkey } = app;
 
       const parsed = parseInstruction(payment);
-      if (parsed.error) return parsed;
+      if (!("instruction" in parsed)) return parsed;
       const pr = parsed.instruction;
 
       let decoded;
