@@ -1386,6 +1386,7 @@ export const catchUp = async () => {
     // Check watched addresses for any missed bitcoin transactions
     const watched = await db.sMembers("watching");
     for (const address of watched as any) {
+      await sleep(1000);
       try {
         const txs = await getAddressTxs(address as string);
         for (const tx of txs as any) {
