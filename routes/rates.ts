@@ -23,7 +23,7 @@ export default {
     if (Date.now() - lastIrt > 60000) {
       try {
         rates.IRT = (
-          (await got("https://api.nobitex.ir/v2/orderbook/BTCIRT").json()) as any
+          (await got("https://apiv2.nobitex.ir/v2/orderbook/BTCIRT").json()) as any
         ).lastTradePrice;
         lastIrt = Date.now();
         await s("rates", { date: _date, fx: _fx, ...rates });
