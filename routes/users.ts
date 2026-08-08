@@ -271,7 +271,7 @@ export default {
 
     user.twofa = false;
     await s(`user:${id}`, user);
-    emit(username, "user", user);
+    emit(username, "user", pick(user, whitelist));
     emit(username, "otpsecret", user.otpsecret);
     l("disabled 2fa", username);
     return c.json({});
@@ -287,7 +287,7 @@ export default {
       if (isValid) {
         user.twofa = true;
         await s(`user:${id}`, user);
-        emit(username, "user", user);
+        emit(username, "user", pick(user, whitelist));
       } else {
         return c.json("Invalid token", 500);
       }
@@ -447,8 +447,8 @@ export default {
         else teardownBip353(user).catch((e) => warn("BIP 353 teardown failed", e.message));
       }
 
-      emit(user.id, "user", user);
-      return c.json({ user });
+      emit(user.id, "user", pick(user, whitelist));
+      return c.json({ user: pick(user, whitelist) });
     } catch (e) {
       console.log(e);
       warn("failed to update", user.username, e.message);
