@@ -32,13 +32,37 @@ const methods = [
 
 const week = 7 * 24 * 60 * 60;
 const nwcEventMaxAgeSeconds = 5 * 60;
+// Tolerated clock skew for future-dated events. Events further ahead than this
+// are rejected so a captured, future-dated signed event can't be replayed later.
+const nwcClockSkewSeconds = 60;
 const handledKey = "handled:nwc";
-const handledMaxSize = 200000;
 
 // Per-pubkey rate limiting for NWC requests
 const nwcRateLimit = config.nwcRateLimit ?? 60;
 const nwcRateWindow = 60 * 1000; // 1 minute in ms
 const nwcRequestTimes: Map<string, number[]> = new Map();
+
+// Per-app async mutex for spends. checkBudget reads `${pubkey}:payments` and the
+// spend is only recorded after the payment settles, so N concurrent requests on
+// one connection would each read the same stale "spent" total and all pass —
+// up to N × max_amount out. Serializing the check + send + record per app closes
+// that window (same shape as withLimitLock for the asset-type limits).
+const budgetLocks: Map<string, Promise<void>> = new Map();
+const withBudgetLock = async <T>(key: string, fn: () => Promise<T>): Promise<T> => {
+  const prev = budgetLocks.get(key) || Promise.resolve();
+  let release: () => void = () => {};
+  const next = new Promise<void>((res) => {
+    release = res;
+  });
+  budgetLocks.set(key, prev.then(() => next));
+  await prev;
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
+};
+const budgetedMethods = new Set(["pay_invoice", "pay", "pay_keysend"]);
 
 export default () => {
   let r: any;
@@ -95,11 +119,27 @@ export default () => {
         const now = Math.floor(Date.now() / 1000);
         const age = now - ev.created_at;
         l("nwc event", ev.id.slice(0, 8), "pubkey", ev.pubkey.slice(0, 8), "age", age);
-        if (ev.created_at && age > nwcEventMaxAgeSeconds) {
-          warn("nwc event too old", age, ev.id.slice(0, 8));
-          return;
+        // Reject events outside the accepted window in BOTH directions. Old events
+        // are stale; future-dated ones (beyond a small skew) could otherwise be
+        // replayed indefinitely once a time-bounded dedup entry expired.
+        if (ev.created_at) {
+          if (age > nwcEventMaxAgeSeconds) {
+            warn("nwc event too old", age, ev.id.slice(0, 8));
+            return;
+          }
+          if (-age > nwcClockSkewSeconds) return;
         }
-        if (await db.zScore(handledKey, ev.id)) {
+        // Atomic dedup claim. SET NX is a single-command check-and-set, so two
+        // concurrent deliveries of the same signed event cannot both pass — the
+        // previous zScore-then-(unawaited)-zAdd let duplicate relay deliveries each
+        // reach handle() and pay twice. The claim outlives the accepted age window
+        // so a future-dated event can't be replayed after it would have expired.
+        if (
+          !(await db.set(`${handledKey}:${ev.id}`, "1", {
+            NX: true,
+            EX: 2 * nwcEventMaxAgeSeconds,
+          }))
+        ) {
           warn("nwc event already handled", ev.id.slice(0, 8));
           return;
         }
@@ -134,12 +174,6 @@ export default () => {
         recent.push(Date.now());
         nwcRequestTimes.set(ev.pubkey, recent);
 
-        db.zAdd(handledKey, { score: now, value: ev.id });
-        db.zRemRangeByScore(handledKey, 0, now - nwcEventMaxAgeSeconds);
-        const size = Number(await db.zCard(handledKey));
-        if (size > handledMaxSize) {
-          await db.zRemRangeByRank(handledKey, 0, size - handledMaxSize - 1);
-        }
         let { content, pubkey } = ev;
         const pk = ev.tags.find((t) => t[0] === "p")[1];
         const sk = serverKeys[pk];
@@ -183,7 +217,13 @@ export default () => {
           }
           const user = await g(`user:${app.uid}`);
 
-          const result = await handle(method, params, ev, app, user);
+          // Serialize budget-affecting methods per app so the budget check and the
+          // resulting spend can't interleave with a concurrent request on the same
+          // connection. Read-only methods run without contending for the lock.
+          const run = () => handle(method, params, ev, app, user);
+          const result = budgetedMethods.has(method)
+            ? await withBudgetLock(app.pubkey, run)
+            : await run();
           const payload = JSON.stringify({ result_type: method, ...result });
           const convKey = nip44.v2.utils.getConversationKey(skBytes, pubkey);
           content = isNip44
@@ -239,6 +279,50 @@ export default () => {
   }
 
   connect();
+};
+
+// Connection validity + spending budget for an NWC app, shared by pay_invoice
+// and pay_keysend. Returns a NIP-47 error payload, or null when the spend is allowed.
+const checkBudget = async (app, amount) => {
+  const { max_amount, budget_renewal, pubkey, created } = app;
+
+  if (!created) {
+    return error({
+      code: "UNAUTHORIZED",
+      message: `This NWC connection is no longer valid please create a new one at https://${config.domain}/settings/nostr`,
+    });
+  }
+
+  const periods = {
+    daily: 60 * 60 * 24 * 1000,
+    weekly: 60 * 60 * 24 * 7 * 1000,
+    monthly: 60 * 60 * 24 * 30 * 1000,
+    yearly: 60 * 60 * 24 * 365 * 1000,
+    never: 60 * 60 * 24 * 365 * 10 * 1000,
+  };
+
+  const pids = await db.lRange(`${pubkey}:payments`, 0, -1);
+  let payments = await Promise.all(pids.map((pid) => g(`payment:${pid}`)));
+  payments = payments.filter((p) => p?.created > Date.now() - periods[budget_renewal]);
+
+  const spent = payments.reduce(
+    (a, b) =>
+      a +
+      (Math.abs(Number.parseInt(b.amount || 0)) +
+        Number.parseInt(b.tip || 0) +
+        Number.parseInt(b.fee || 0) +
+        Number.parseInt(b.ourfee || 0)),
+    0,
+  );
+
+  if (max_amount > 0 && spent + amount > max_amount) {
+    return error({
+      code: "QUOTA_EXCEEDED",
+      message: `Budget exceeded: ${spent + amount} of ${max_amount}`,
+    });
+  }
+
+  return null;
 };
 
 const handle = (method, params, ev, app, user) =>
@@ -369,6 +453,13 @@ const handle = (method, params, ev, app, user) =>
         }
       }
 
+      // Keysend spends the same custodial balance as pay_invoice, so it must be
+      // subject to the same budget — otherwise a budget-limited connection string
+      // is a full-drain credential. It also left no `${app.pubkey}:payments`
+      // entry, so subsequent budgeted calls under-counted the spend.
+      const budgetError = await checkBudget(app, amount);
+      if (budgetError) return budgetError;
+
       try {
         const { payment_hash } = await sendKeysend({
           hash: ev.id,
@@ -376,7 +467,14 @@ const handle = (method, params, ev, app, user) =>
           pubkey,
           user,
           extratlvs,
+          fee: app.max_fee,
         });
+
+        // Record the debit against the app budget. debit() stored the payment id
+        // under the keysend label (= ev.id); resolve and push it so checkBudget
+        // counts this spend going forward.
+        const pid = await g(`payment:${ev.id}`);
+        if (pid) await db.lPush(`${app.pubkey}:payments`, pid);
 
         for (let i = 0; i < 10; i++) {
           const { pays } = await ln.listpays({ payment_hash });
