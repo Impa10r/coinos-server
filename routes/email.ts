@@ -23,7 +23,7 @@ export default {
         })
         .json()) as any;
 
-      if (success || response === config.adminpass) {
+      if (success || (!!config.adminpass && response === config.adminpass)) {
         body.token = undefined;
 
         warn("support request from", email);

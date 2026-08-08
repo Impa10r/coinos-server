@@ -124,7 +124,7 @@ export default {
 
   async sanitizeImages(c) {
     const { secret } = await c.req.json().catch(() => ({}));
-    if (secret !== config.adminpass) fail("unauthorized");
+    if (!config.adminpass || secret !== config.adminpass) fail("unauthorized");
 
     let count = 0;
     for await (const k of scan("user:*")) {
@@ -467,7 +467,12 @@ export default {
       if (ipCount === 1) await db.expire(ipKey, 10);
       if (prod && Number(ipCount) > 30) return c.json({}, 429);
 
-      const isAdmin = password === config?.adminpass;
+      // Fail closed: an unset adminpass must never authenticate, and an omitted
+      // password field must never coincide with an unset value (undefined ===
+      // undefined). Both the configured value and the supplied one must be
+      // non-empty and match exactly.
+      const isAdmin =
+        !!config?.adminpass && !!password && password === config.adminpass;
 
       if (!isAdmin) {
         const recaptchaOk = await verifyRecaptcha(recaptcha, c, body);

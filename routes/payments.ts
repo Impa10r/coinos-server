@@ -557,7 +557,7 @@ export default {
     if (ourWallet && wallet && wallet !== ourWallet) return c.json({});
 
     try {
-      if (secret !== config.adminpass) fail("unauthorized");
+      if (!config.adminpass || secret !== config.adminpass) fail("unauthorized");
 
       const node = rpc({ ...config[type], wallet });
       let tx;
@@ -749,10 +749,10 @@ export default {
         return c.json({ error: "invalid JSON body" }, 400);
       }
       const secret = body?.secret;
-      if (typeof secret !== "string") {
+      if (typeof secret !== "string" || !secret) {
         return c.json({ error: "missing secret" }, 400);
       }
-      if (secret !== config.adminpass) {
+      if (!config.adminpass || secret !== config.adminpass) {
         return c.json({ error: "unauthorized" }, 401);
       }
       await s("freeze", true);
