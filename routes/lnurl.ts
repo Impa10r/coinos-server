@@ -150,6 +150,14 @@ export default {
         user,
       });
 
+      if (comment) {
+        // Enforce the commentAllowed:512 we advertise in the lnurlp response.
+        // This overwrite happens after generate()'s own memo validation, so an
+        // uncapped comment would otherwise reach credit() at settlement time.
+        invoice.memo = String(comment).slice(0, 512);
+        await s(`invoice:${invoice.id}`, invoice);
+      }
+
       l("lnurl invoice", invoice.id, "hash", invoice.hash?.slice(0, 20));
       return c.json({
         pr: invoice.text,
