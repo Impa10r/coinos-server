@@ -173,7 +173,7 @@ app.post("/disable2fa", auth, users.disable2fa);
 app.post("/2fa", auth, users.enable2fa);
 app.post("/user", auth, users.update);
 app.post("/reset", optional, users.reset);
-app.post("/upload/:type", users.upload);
+app.post("/upload/:type", auth, users.upload);
 app.post("/acl", users.acl);
 app.post("/superuser", users.superuser);
 app.get("/verify/:code", users.verify);
