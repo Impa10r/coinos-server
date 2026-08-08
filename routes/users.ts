@@ -533,6 +533,21 @@ export default {
           });
           await s(`user:${user.id}`, user);
         }
+
+        // Transparent bcrypt upgrade: legacy accounts were hashed at cost 4
+        // (~1,300 guesses/s). Now that we hold the verified plaintext, re-hash
+        // at the current cost so the stored hash strengthens on next login.
+        const cost = Number.parseInt(
+          user.password.match(/^\$2[aby]\$(\d{2})\$/)?.[1] ?? "0",
+          10,
+        );
+        if (cost < 12) {
+          user.password = await Bun.password.hash(password, {
+            algorithm: "bcrypt",
+            cost: 12,
+          });
+          await s(`user:${user.id}`, user);
+        }
       }
 
       if (!user) return c.json({}, 401);
