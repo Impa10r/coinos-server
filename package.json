@@ -8,7 +8,8 @@
     "dev": "nodemon --exec bun index.ts",
     "lint": "oxlint . && oxfmt --check .",
     "lint:fix": "oxlint --fix . && oxfmt .",
-    "format": "oxfmt ."
+    "format": "oxfmt .",
+    "test:regtest": "docker exec app sh -c 'cd /home/bun/app && bun test test/'"
   },
   "dependencies": {
     "@arkade-os/sdk": "0.4.6",
