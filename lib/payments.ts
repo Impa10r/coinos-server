@@ -910,6 +910,17 @@ export const sendLightning = async ({
   if (pays.find((p) => p.status === "pending"))
     fail("Payment is already underway");
 
+  // A prior attempt at this same invoice may still be awaiting reconciliation
+  // by check() (its CLN parts resolved but the debit hasn't been reversed or
+  // finalized yet). The pending set is keyed by bolt11 and shared across
+  // attempts, so letting a retry proceed here means the retry's own
+  // reverse()/finalize() clears the shared entry and ORPHANS the first
+  // attempt's debit — check() never sees it again and the user is never
+  // refunded. Make the retry wait until reconciliation clears the entry
+  // (seconds to ~a minute).
+  if (await db.sIsMember("pending", pr))
+    fail("Previous attempt is still settling, please retry in a minute");
+
   p = await debit({
     hash: pr,
     amount: amount_msat ? Math.round(amount_msat / 1000) : amount,
@@ -1271,7 +1282,16 @@ export const check = async () => {
       // payment that actually settled (the LEAKED DEBIT losses). Wait well past
       // the retry window so sendLightning has finished finalize()/reverse() and
       // removed it from `pending` before check() ever touches it.
-      if (!p || Date.now() - p.created < 60000) continue;
+      // No record anywhere (main db or archive) means there's nothing left to
+      // reconcile — the debit was already reversed or the entry is a stale
+      // stray. Drop it: sendLightning now refuses to re-pay an invoice while
+      // its bolt11 sits in this set, so a dead entry would otherwise block
+      // that invoice forever.
+      if (!p) {
+        await db.sRem("pending", pr);
+        continue;
+      }
+      if (Date.now() - p.created < 60000) continue;
       const { pays } = await ln.listpays(pr);
 
       const failed = !pays.length || pays.every((p) => p.status === "failed");
