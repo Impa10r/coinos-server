@@ -99,6 +99,32 @@ function lightningProxy(rpcPath: string) {
   let backoff = 250;
   const maxBackoff = 5000;
 
+  const deathCbs = new Set<(reason?: string) => void>();
+
+  // Fully tear down a dead client. Just doing `client = null` orphans the old
+  // LightningClient: the @asoltys/clightning-client library keeps its internal
+  // reconnect() loop running on the (dead) socket forever — spamming
+  // `connect ENOENT …/lightning-rpc` and leaking a socket + timer on EVERY cl
+  // restart. So stop its reconnect loop, destroy the socket, and drop listeners.
+  // Then notify subscribers (the invoice listener) so they can recycle at once
+  // rather than waiting on the 5-minute stall watchdog. `notify=false` for a
+  // deliberate reset() where the caller already owns the re-arm.
+  function dropClient(reason?: string, notify = true) {
+    const dead = client;
+    client = null;
+    if (dead) {
+      try {
+        if (dead.reconnectTimeout) { clearTimeout(dead.reconnectTimeout); dead.reconnectTimeout = null; }
+        dead.reconnect = () => {}; // neuter any pending 'error'/'end' handler
+        dead.rl?.close?.();
+        dead.client?.removeAllListeners?.();
+        dead.client?.destroy?.();
+        dead.removeAllListeners?.();
+      } catch (_) {}
+    }
+    if (notify) for (const cb of deathCbs) { try { cb(reason); } catch (_) {} }
+  }
+
   function ensure() {
     if (client) return client;
 
@@ -116,10 +142,13 @@ function lightningProxy(rpcPath: string) {
     }
 
     try {
-      client = new LightningClient(rpcPath);
-      // Prevent unhandled 'error' events from crashing the process
-      client.on("error", (e: any) => {
-        if (isSocketDied(e)) client = null;
+      const c = new LightningClient(rpcPath);
+      client = c;
+      // Prevent unhandled 'error' events from crashing the process. Guard on
+      // `c === client` so a stale client's late error can't tear down a newer,
+      // healthy one that already replaced it.
+      c.on("error", (e: any) => {
+        if (c === client && isSocketDied(e)) dropClient(e?.code ?? e?.errno);
       });
       backoff = 250;
       nextTryAt = 0;
@@ -151,12 +180,19 @@ function lightningProxy(rpcPath: string) {
         if (prop === "reset") {
           return () => {
             const had = !!client;
-            try {
-              client?.removeAllListeners?.();
-              client?.destroy?.();
-            } catch (_) {}
-            client = null;
+            dropClient("reset", false); // caller (watchdog) owns the re-arm
             return had;
+          };
+        }
+
+        // Subscribe to socket-death so a consumer (the invoice listener) can
+        // recover the instant the connection dies, instead of polling/waiting.
+        // Returns an unsubscribe fn. Handled before the generic RPC dispatch so
+        // "onDrop" is never sent to cl as a method.
+        if (prop === "onDrop") {
+          return (cb: (reason?: string) => void) => {
+            deathCbs.add(cb);
+            return () => deathCbs.delete(cb);
           };
         }
 
@@ -186,7 +222,7 @@ function lightningProxy(rpcPath: string) {
           } catch (e: any) {
             // ETIMEDOUT (from RpcTimeoutError) is included in isSocketDied, so a
             // hung RPC drops the client and the next call reconnects.
-            if (isSocketDied(e)) client = null;
+            if (isSocketDied(e)) dropClient(e?.code ?? e?.errno);
             throw e;
           }
         };

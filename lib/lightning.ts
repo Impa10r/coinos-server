@@ -26,6 +26,26 @@ let waitStartedAt = Date.now();
 // out instead of re-arming, so we never run two listeners concurrently.
 let listenerEpoch = 0;
 
+// Recover the invoice listener the instant its long-poll socket dies (e.g. a cl
+// restart) instead of waiting up to LISTENER_STALL_MS for the stall watchdog.
+// waitanyinvoice is a NO_TIMEOUT long-poll, so a dead socket leaves it blocked
+// forever with no error — this onDrop signal is the only prompt trigger. Bump the
+// epoch so the (possibly forever-blocked) old invocation bows out, mark inactive,
+// and re-arm. If cl is still down, ensure()'s backoff + the retry loop below wait
+// it out. Debounced so a burst of socket errors recycles once.
+let recycleArmed = false;
+(lnListen as any).onDrop?.(() => {
+  if (!listenerActive || recycleArmed) return;
+  recycleArmed = true;
+  listenerEpoch++;
+  listenerActive = false;
+  warn("lightning listener: listen socket dropped — recycling immediately");
+  setTimeout(() => {
+    recycleArmed = false;
+    listenForLightning();
+  }, 100);
+});
+
 export async function listenForLightning() {
   if (listenerActive) {
     warn("lightning listener: already active, skipping duplicate call");
@@ -141,8 +161,16 @@ export async function listenForLightning() {
       `error=${errorMsg}`
     );
 
+    // A cl restart makes ensure() throw LightningUnavailableError until the socket
+    // returns — expected, self-heals, and restarting the app can't fix a down cl.
+    // So don't count it toward the process-exit escalation; just keep retrying and
+    // resume within LISTENER_RETRY_DELAY of cl coming back. Only genuine listener
+    // errors climb toward a container restart.
     if (e instanceof LightningUnavailableError) {
       err("lightning listener: RPC socket unavailable");
+      warn(`lightning listener: cl unavailable, retrying in ${LISTENER_RETRY_DELAY / 1000}s`);
+      setTimeout(listenForLightning, LISTENER_RETRY_DELAY);
+      return;
     }
 
     listenerRetries++;
