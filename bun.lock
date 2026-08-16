@@ -51,6 +51,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "@asoltys/clightning-client@0.2.0": "patches/@asoltys+clightning-client+0.2.0.patch",
+  },
   "overrides": {
     "axios": ">=1.18.0",
     "bn.js": ">=5.2.2",
