@@ -2,6 +2,9 @@
   "name": "coinos",
   "version": "0.0.1",
   "private": true,
+  "patchedDependencies": {
+    "@asoltys/clightning-client@0.1.10": "patches/@asoltys+clightning-client+0.1.10.patch"
+  },
   "scripts": {
     "start": "bun index.ts",
     "dev": "nodemon --exec bun index.ts",

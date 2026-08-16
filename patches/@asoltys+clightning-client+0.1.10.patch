@@ -1,0 +1,54 @@
+diff --git a/index.js b/index.js
+index 968489c..4d96c34 100644
+--- a/index.js
++++ b/index.js
+@@ -42,7 +42,31 @@ class LightningClient extends EventEmitter {
+ 		this.reconnectTimeout = null;
+ 		this.reqcount = 0;
+ 
+-		this.client = net.createConnection(rpcPath);
++		this._setup();
++	}
++
++	_setup() {
++		// Build a FRESH socket + readline for every (re)connection. The original
++		// code reused this.client and only called this.client.connect() on
++		// reconnect — but a socket that has already emitted 'error'/'close' is
++		// destroyed, so reconnecting it is a no-op/throw. That left the client
++		// wedged looping `connect ENOENT …/lightning-rpc` forever after a cl
++		// restart (spamming logs, leaking a socket+timer, never recovering).
++		// Renewing clientConnectionPromise here also makes call() block until the
++		// (re)connection is live instead of writing into a dead socket.
++		if (this.client) {
++			try {
++				this.client.removeAllListeners();
++				this.client.destroy();
++			} catch (e) {}
++		}
++		if (this.rl) {
++			try {
++				this.rl.close();
++			} catch (e) {}
++		}
++
++		this.client = net.createConnection(this.rpcPath);
+ 		this.rl = readline.createInterface({ input: this.client });
+ 
+ 		this.clientConnectionPromise = new Promise((resolve) => {
+@@ -87,8 +111,15 @@ class LightningClient extends EventEmitter {
+ 		}
+ 
+ 		this.reconnectTimeout = setTimeout(() => {
+-			this.client.connect(this.rpcPath);
++			// Clear the guard BEFORE (re)connecting so a throw can't leave it set
++			// and permanently block every future reconnect() (the original bug).
+ 			this.reconnectTimeout = null;
++			try {
++				this._setup();
++			} catch (e) {
++				this.increaseWaitTime();
++				this.reconnect();
++			}
+ 		}, this.reconnectWait * 1000);
+ 	}
+ 
