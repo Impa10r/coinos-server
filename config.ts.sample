@@ -30,6 +30,11 @@ export default {
     network: "regtest",
     port: 18443,
     esploraUrl: "http://cs:3000",
+    // Optional: an onion mirror of esploraUrl, tried first (falling back to
+    // esploraUrl on any failure) when LNURL_PROXY is set to a Tor SOCKS5
+    // proxy. Public esplora instances often rate-limit clearnet IPs harder
+    // than their onion service. Leave unset to always use esploraUrl.
+    // esploraOnionUrl: "http://explorerzydxu5ecjrkwceayqybizmpjjznk5izmitf2modhcusuqlid.onion/api",
     zmq: {
       rawtx: 18507,
       rawblock: 18506,

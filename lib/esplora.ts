@@ -1,8 +1,18 @@
 import config from "$config";
 import { HDKey } from "@scure/bip32";
 import { p2wpkh, NETWORK, TEST_NETWORK } from "@scure/btc-signer";
+import got from "got";
+import { SocksProxyAgent } from "socks-proxy-agent";
 
 const { esploraUrl } = config.bitcoin;
+// Optional onion mirror + Tor SOCKS5 proxy (same LNURL_PROXY used for lnurl
+// fetches elsewhere). Public esplora instances often rate-limit their
+// clearnet IP harder than their onion service. Bun's native fetch only
+// speaks HTTP(S) proxies, not SOCKS5, so the onion path goes through got +
+// SocksProxyAgent instead — same pattern routes/lnurl.ts already uses.
+const esploraOnionUrl = (config.bitcoin as any).esploraOnionUrl as string | undefined;
+const { LNURL_PROXY } = process.env;
+const torAgent = LNURL_PROXY && esploraOnionUrl ? new SocksProxyAgent(LNURL_PROXY) : undefined;
 
 const REGTEST_NETWORK = {
   bech32: "bcrt",
@@ -37,7 +47,43 @@ const hdVersions =
 // waits out the same cooldown before trying again, so the whole process
 // actually slows down to what the server is asking for.
 let cooldownUntil = 0;
-const fetchEsplora = async (path: string, init?: RequestInit, maxRetries = 6) => {
+
+// Normalized response shape shared by both transports (fetch's Response and
+// got's Response have different shapes) so callers below never need to care
+// which one actually served the request.
+type EsploraResponse = { ok: boolean; status: number; json: () => Promise<any>; text: () => Promise<string> };
+
+// Try the onion mirror over Tor. Returns undefined (never throws) on any
+// failure — connection refused, bad TLS, wrong shape, whatever — so the
+// caller falls straight back to clearnet rather than surfacing an onion-
+// specific error for what's ultimately an optional path.
+const fetchOnion = async (path: string, init?: RequestInit): Promise<EsploraResponse | undefined> => {
+  if (!torAgent || !esploraOnionUrl) return undefined;
+  try {
+    const res = await got(`${esploraOnionUrl}${path}`, {
+      method: (init?.method as any) || "GET",
+      body: init?.body as any,
+      headers: init?.headers as any,
+      agent: { http: torAgent as any, https: torAgent as any },
+      throwHttpErrors: false,
+      timeout: { request: 15_000 },
+      retry: { limit: 0 },
+    });
+    return {
+      ok: res.statusCode >= 200 && res.statusCode < 300,
+      status: res.statusCode,
+      json: async () => JSON.parse(res.body),
+      text: async () => res.body,
+    };
+  } catch {
+    return undefined;
+  }
+};
+
+const fetchEsplora = async (path: string, init?: RequestInit, maxRetries = 6): Promise<EsploraResponse> => {
+  const onion = await fetchOnion(path, init);
+  if (onion) return onion;
+
   for (let attempt = 0; ; attempt++) {
     const wait = cooldownUntil - Date.now();
     if (wait > 0) await new Promise((res) => setTimeout(res, wait));
