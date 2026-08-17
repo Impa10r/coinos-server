@@ -27,6 +27,7 @@ export default [
   "locked",
   "locktime",
   "memoPrompt",
+  "migrated",
   "nip5",
   "notify",
   "npub",
