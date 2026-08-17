@@ -240,7 +240,13 @@ export const debit = async ({
     memo,
     iid,
     uid,
-    confirmed: true,
+    // Lightning/bolt12 sends are IN-FLIGHT until the HTLC settles (preimage
+    // revealed). Don't mark them confirmed on the optimistic debit — finalize()
+    // flips this to true once the preimage arrives. Hold invoices (e.g. Ark)
+    // can keep an HTLC pending for hours/days; showing "confirmed" while the
+    // recipient hasn't been paid is misleading. Other send types settle
+    // immediately (internal) or are broadcast right away (bitcoin/liquid/fund).
+    confirmed: ![PaymentType.lightning, PaymentType.bolt12].includes(type),
     rate,
     currency,
     type,
@@ -953,7 +959,7 @@ export const sendKeysend = async ({
   }
 
   try {
-    return await outLn.keysend({
+    const r = await outLn.keysend({
       destination: pubkey,
       amount_msat: amount * 1000,
       maxfee: fee * 1000,
@@ -961,6 +967,15 @@ export const sendKeysend = async ({
       label: hash,
       extratlvs,
     });
+    // Debit created this payment as confirmed:false (in-flight, same as any
+    // other lightning send) — flip it now that keysend has settled, or it
+    // would show "pending" forever despite having succeeded.
+    try {
+      await finalize(r, p);
+    } catch (e: any) {
+      warnThrottled("keysend: finalize failed", e?.message ?? String(e));
+    }
+    return r;
   } catch (e) {
     try {
       if (startIndex === undefined) {
@@ -1799,6 +1814,8 @@ const finalize = async (r, p) => {
   const maxfee = p.fee;
   p.ref = preimage;
   p.preimage = preimage; // Ensure preimage is available for frontend & Nostr emit
+  // The HTLC settled (we have the preimage) — the send is now fully confirmed.
+  p.confirmed = true;
 
   // Attempt to emit a Nostr Zap receipt if this payment was a NIP-57 zap
   try {
