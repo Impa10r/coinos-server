@@ -1124,7 +1124,7 @@ const completeLightningInBackground = async ({
     } catch {
       warn("failed to process payment", p.id);
     }
-  } catch (e: any) {
+  } catch {
     err("failed to pay", pr.substr(-8));
 
     // Before reversing, double-check whether the payment actually settled

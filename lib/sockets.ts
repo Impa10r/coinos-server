@@ -11,7 +11,7 @@ import { fail, getUser } from "$lib/utils";
 const verifyToken = (token) => {
   try {
     return jwt.verify(token, config.jwt);
-  } catch (e) {
+  } catch {
     return null;
   }
 };

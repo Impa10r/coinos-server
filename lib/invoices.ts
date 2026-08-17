@@ -220,7 +220,7 @@ export const getUserOffer = async (user) => {
   let domain;
   try {
     domain = new URL(process.env.URL as string).host;
-  } catch (e) {}
+  } catch {}
 
   const invoice = await generate({
     invoice: {
