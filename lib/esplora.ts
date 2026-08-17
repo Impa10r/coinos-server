@@ -1,18 +1,31 @@
 import config from "$config";
 import { HDKey } from "@scure/bip32";
 import { p2wpkh, NETWORK, TEST_NETWORK } from "@scure/btc-signer";
-import got from "got";
-import { SocksProxyAgent } from "socks-proxy-agent";
 
 const { esploraUrl } = config.bitcoin;
 // Optional onion mirror + Tor SOCKS5 proxy (same LNURL_PROXY used for lnurl
 // fetches elsewhere). Public esplora instances often rate-limit their
-// clearnet IP harder than their onion service. Bun's native fetch only
-// speaks HTTP(S) proxies, not SOCKS5, so the onion path goes through got +
-// SocksProxyAgent instead — same pattern routes/lnurl.ts already uses.
+// clearnet IP harder than their onion service.
+//
+// This shells out to curl rather than using got + socks-proxy-agent (the
+// pattern routes/lnurl.ts uses for its own onion routing): Bun's fetch does
+// not correctly honor Node-style http.Agent objects — including
+// socks-proxy-agent — over a proxy, a currently-open Bun runtime bug
+// (oven-sh/bun#15499 and related). Confirmed directly: the exact same
+// SOCKS5 request that fails from Bun with "FailedToOpenSocket" succeeds
+// immediately via curl. routes/lnurl.ts's onion proxying likely hits the
+// same bug — out of scope to fix here, but worth knowing about.
 const esploraOnionUrl = (config.bitcoin as any).esploraOnionUrl as string | undefined;
 const { LNURL_PROXY } = process.env;
-const torAgent = LNURL_PROXY && esploraOnionUrl ? new SocksProxyAgent(LNURL_PROXY) : undefined;
+const torProxyHostPort = (() => {
+  if (!LNURL_PROXY) return undefined;
+  try {
+    const u = new URL(LNURL_PROXY);
+    return `${u.hostname}:${u.port}`;
+  } catch {
+    return undefined;
+  }
+})();
 
 const REGTEST_NETWORK = {
   bech32: "bcrt",
@@ -53,27 +66,52 @@ let cooldownUntil = 0;
 // which one actually served the request.
 type EsploraResponse = { ok: boolean; status: number; json: () => Promise<any>; text: () => Promise<string> };
 
-// Try the onion mirror over Tor. Returns undefined (never throws) on any
-// failure — connection refused, bad TLS, wrong shape, whatever — so the
+// Try the onion mirror over Tor via curl (see the module-level comment for
+// why not a JS proxy agent). Returns undefined (never throws) on any
+// failure — connection refused, curl missing, bad shape, whatever — so the
 // caller falls straight back to clearnet rather than surfacing an onion-
 // specific error for what's ultimately an optional path.
+const HTTP_STATUS_MARKER = "\n__COINOS_HTTP_STATUS__:";
 const fetchOnion = async (path: string, init?: RequestInit): Promise<EsploraResponse | undefined> => {
-  if (!torAgent || !esploraOnionUrl) return undefined;
+  if (!torProxyHostPort || !esploraOnionUrl) return undefined;
   try {
-    const res = await got(`${esploraOnionUrl}${path}`, {
-      method: (init?.method as any) || "GET",
-      body: init?.body as any,
-      headers: init?.headers as any,
-      agent: { http: torAgent as any, https: torAgent as any },
-      throwHttpErrors: false,
-      timeout: { request: 15_000 },
-      retry: { limit: 0 },
-    });
+    const method = (init?.method as string) || "GET";
+    const args = [
+      "curl",
+      "-s",
+      "--max-time",
+      "15",
+      "--socks5-hostname",
+      torProxyHostPort,
+      "-X",
+      method,
+      "-w",
+      `${HTTP_STATUS_MARKER}%{http_code}`,
+    ];
+    if (init?.headers) {
+      for (const [k, v] of Object.entries(init.headers as Record<string, string>)) {
+        args.push("-H", `${k}: ${v}`);
+      }
+    }
+    if (init?.body) args.push("--data-binary", String(init.body));
+    args.push(`${esploraOnionUrl}${path}`);
+
+    const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
+    const out = await new Response(proc.stdout).text();
+    const code = await proc.exited;
+    if (code !== 0) return undefined;
+
+    const markerAt = out.lastIndexOf(HTTP_STATUS_MARKER);
+    if (markerAt === -1) return undefined;
+    const body = out.slice(0, markerAt);
+    const status = Number.parseInt(out.slice(markerAt + HTTP_STATUS_MARKER.length), 10);
+    if (!Number.isFinite(status)) return undefined;
+
     return {
-      ok: res.statusCode >= 200 && res.statusCode < 300,
-      status: res.statusCode,
-      json: async () => JSON.parse(res.body),
-      text: async () => res.body,
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => JSON.parse(body),
+      text: async () => body,
     };
   } catch {
     return undefined;
