@@ -1475,6 +1475,40 @@ export const checkOutgoingConfirmations = async () => {
   }
 };
 
+// Watched addresses generated via bc.getNewAddress() (regular custodial
+// bitcoin invoices) live in our own wallet, so bitcoind already tracks them
+// with no external calls and no rate limit. Only non-custodial addresses
+// derived from an imported xpub (deriveAddress in lib/esplora.ts) are unknown
+// to the wallet — for those this returns undefined so the caller falls back
+// to esplora. Reshapes gettransaction's per-address `details` into the
+// esplora-vout shape processWatchedTx expects, indexed by real output
+// position (details[].vout) since processWatchedTx addresses tx.vout by index.
+const getOwnWalletTxs = async (address: string) => {
+  const info: any = await bc.getAddressInfo(address);
+  if (!info.ismine) return undefined;
+
+  const received: any[] = await bc.listReceivedByAddress(0, true, true, address);
+  const entry = received.find((r) => r.address === address);
+  if (!entry) return [];
+
+  const txs = [];
+  for (const txid of entry.txids) {
+    const txInfo: any = await bc.getTransaction(txid);
+    const vout: any[] = [];
+    for (const d of txInfo.details) {
+      if (d.category !== "receive") continue;
+      vout[d.vout] = { scriptpubkey_address: d.address, value: Math.round(d.amount * SATS) };
+    }
+    for (let i = 0; i < vout.length; i++) if (!vout[i]) vout[i] = {};
+    txs.push({
+      txid: txInfo.txid,
+      vout,
+      status: { confirmed: (txInfo.confirmations || 0) > 0 },
+    });
+  }
+  return txs;
+};
+
 export const catchUp = async () => {
   try {
     // Check watched addresses for any missed bitcoin transactions
@@ -1482,7 +1516,8 @@ export const catchUp = async () => {
     for (const address of watched as any) {
       await sleep(1000);
       try {
-        const txs = await getAddressTxs(address as string);
+        const own = await getOwnWalletTxs(address as string);
+        const txs = own !== undefined ? own : await getAddressTxs(address as string);
         for (const tx of txs as any) {
           await processWatchedTx(tx);
         }

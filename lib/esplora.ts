@@ -27,8 +27,27 @@ const hdVersions =
 
 // Esplora API
 
+// Public esplora instances rate-limit with 429s well inside what a cold-start
+// catchUp() burst (one request per watched address) can trigger. Retry those
+// specifically, honoring Retry-After when the server sends one, with
+// exponential backoff otherwise — every esplora call shares the same budget,
+// so this lives at the fetch layer rather than in each caller.
+const fetchEsplora = async (path: string, init?: RequestInit, maxRetries = 4) => {
+  let attempt = 0;
+  for (;;) {
+    const r = await fetch(`${esploraUrl}${path}`, init);
+    if (r.status !== 429 || attempt >= maxRetries) return r;
+    const retryAfter = Number.parseFloat(r.headers.get("retry-after") || "");
+    const delayMs = Number.isFinite(retryAfter)
+      ? retryAfter * 1000
+      : 500 * 2 ** attempt + Math.random() * 250;
+    await new Promise((res) => setTimeout(res, delayMs));
+    attempt++;
+  }
+};
+
 export const getUtxos = async (address: string) => {
-  const r = await fetch(`${esploraUrl}/address/${address}/utxo`);
+  const r = await fetchEsplora(`/address/${address}/utxo`);
   if (!r.ok) throw new Error(`esplora getUtxos: ${r.status}`);
   return r.json();
 };
@@ -46,7 +65,7 @@ export const getAddressUtxos = async (addresses: string[]) => {
 };
 
 export const broadcastTx = async (txHex: string) => {
-  const r = await fetch(`${esploraUrl}/tx`, {
+  const r = await fetchEsplora("/tx", {
     method: "POST",
     body: txHex,
     headers: { "Content-Type": "text/plain" },
@@ -59,31 +78,31 @@ export const broadcastTx = async (txHex: string) => {
 };
 
 export const getTxStatus = async (txid: string) => {
-  const r = await fetch(`${esploraUrl}/tx/${txid}/status`);
+  const r = await fetchEsplora(`/tx/${txid}/status`);
   if (!r.ok) throw new Error(`esplora getTxStatus: ${r.status}`);
   return r.json();
 };
 
 export const getFeeEstimates = async () => {
-  const r = await fetch(`${esploraUrl}/fee-estimates`);
+  const r = await fetchEsplora("/fee-estimates");
   if (!r.ok) throw new Error(`esplora getFeeEstimates: ${r.status}`);
   return r.json();
 };
 
 export const getTx = async (txid: string) => {
-  const r = await fetch(`${esploraUrl}/tx/${txid}`);
+  const r = await fetchEsplora(`/tx/${txid}`);
   if (!r.ok) throw new Error(`esplora getTx: ${r.status}`);
   return r.json();
 };
 
 export const getAddressTxs = async (address: string) => {
-  const r = await fetch(`${esploraUrl}/address/${address}/txs`);
+  const r = await fetchEsplora(`/address/${address}/txs`);
   if (!r.ok) throw new Error(`esplora getAddressTxs: ${r.status}`);
   return r.json();
 };
 
 export const getTxHex = async (txid: string) => {
-  const r = await fetch(`${esploraUrl}/tx/${txid}/hex`);
+  const r = await fetchEsplora(`/tx/${txid}/hex`);
   if (!r.ok) throw new Error(`esplora getTxHex: ${r.status}`);
   return r.text();
 };
