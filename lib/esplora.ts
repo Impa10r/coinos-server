@@ -27,22 +27,31 @@ const hdVersions =
 
 // Esplora API
 
-// Public esplora instances rate-limit with 429s well inside what a cold-start
-// catchUp() burst (one request per watched address) can trigger. Retry those
-// specifically, honoring Retry-After when the server sends one, with
-// exponential backoff otherwise — every esplora call shares the same budget,
-// so this lives at the fetch layer rather than in each caller.
-const fetchEsplora = async (path: string, init?: RequestInit, maxRetries = 4) => {
-  let attempt = 0;
-  for (;;) {
+// Public esplora instances can rate-limit with a sustained 429 window (not
+// just a brief burst), and every exported function here shares that one
+// budget. A per-call retry loop doesn't help against a sustained limit: N
+// concurrent/sequential callers each independently backing off still add up
+// to more requests than the server wants, so they keep colliding. Track the
+// cooldown as shared module state instead — once any call gets a 429,
+// EVERY subsequent esplora call (regardless of which function or caller)
+// waits out the same cooldown before trying again, so the whole process
+// actually slows down to what the server is asking for.
+let cooldownUntil = 0;
+const fetchEsplora = async (path: string, init?: RequestInit, maxRetries = 6) => {
+  for (let attempt = 0; ; attempt++) {
+    const wait = cooldownUntil - Date.now();
+    if (wait > 0) await new Promise((res) => setTimeout(res, wait));
+
     const r = await fetch(`${esploraUrl}${path}`, init);
-    if (r.status !== 429 || attempt >= maxRetries) return r;
+    if (r.status !== 429) return r;
+
     const retryAfter = Number.parseFloat(r.headers.get("retry-after") || "");
     const delayMs = Number.isFinite(retryAfter)
       ? retryAfter * 1000
-      : 500 * 2 ** attempt + Math.random() * 250;
-    await new Promise((res) => setTimeout(res, delayMs));
-    attempt++;
+      : Math.min(60_000, 1000 * 2 ** attempt) + Math.random() * 250;
+    cooldownUntil = Math.max(cooldownUntil, Date.now() + delayMs);
+
+    if (attempt >= maxRetries) return r;
   }
 };
 
