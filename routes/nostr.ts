@@ -339,7 +339,21 @@ export default {
     const name = c.req.query("name");
     let names = {};
     if (name) {
-      names = { [name]: (await getUser(name, fields)).pubkey };
+      // v3 registrar first: a claimed name's NIP-05 belongs to its wallet key.
+      // Legacy accounts answer as before when the registrar doesn't know it.
+      try {
+        const r = await fetch(
+          `${process.env.NAMES_URL || "https://names.coinos.io"}/.well-known/nostr.json?name=${encodeURIComponent(name)}`,
+          { signal: AbortSignal.timeout(3000) },
+        );
+        if (r.ok) {
+          const j = await r.json();
+          if (j?.names?.[name]) return res.send({ names: { [name]: j.names[name] } });
+        }
+      } catch {}
+      const u = await getUser(name, fields);
+      if (!u) return res.send({ names: {} }); // unknown name: empty per NIP-05, not a 500
+      names = { [name]: u.pubkey };
     } else {
       const records = await db.sMembers("nip5");
       for (const s of records) {
