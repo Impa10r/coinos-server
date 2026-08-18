@@ -309,8 +309,19 @@ export default () => {
           await reply({ result_type: method, ...result });
         }
       } catch (e) {
-        // Stale client state (deleted app or migrated user) is not a server fault — don't log.
-        if (e.message === "pubkey not found" || e.message === "user not found") return;
+        // Stale client state (deleted app or migrated user) is not a server
+        // fault — don't log it, but DO answer: a NIP-47 UNAUTHORIZED reply
+        // lets the client surface an error instead of spinning forever on a
+        // connection this server no longer knows.
+        if (e.message === "pubkey not found" || e.message === "user not found") {
+          try {
+            await reply({
+              result_type: method,
+              error: { code: "UNAUTHORIZED", message: "unknown connection" },
+            });
+          } catch (_) {}
+          return;
+        }
         err("problem with nwc", pubkey, method, e.message);
         // Still reply so the client isn't left hanging on the failure.
         try {
