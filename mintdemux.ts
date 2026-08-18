@@ -18,8 +18,18 @@
 //   - GET /v1/melt/quote/bolt11/<id> -> OLD (id rewritten) if that melt was
 //        executed on OLD, else NEW — so wallets can poll a recovery melt
 //   - /v1/checkstate         -> both mints, merged (spent if either says spent)
+//   - /v1/ws                 -> websocket proxy to NEW (subscriptions)
 //   - everything else (swap, mint, restore, mint quote) -> NEW
 // The OLD mint also stands alone at mintrecovery.coinos.io (direct).
+//
+// Client-IP forwarding: cloudflared stamps cf-connecting-ip on every request;
+// demux forwards it upstream so the mints' per-IP rate limiter buckets by the
+// real client instead of lumping all of mint.coinos.io into demux's socket IP.
+// Partner hosts that funnel many end users through one IP (lightning-address
+// aggregators etc.) can be listed in <LOG_DIR>/whitelist.json:
+//   { "ips": ["1.2.3.4", "2600:..."], "pool": 10 }
+// Their bucket key rotates across <pool> synthetic keys, so their effective
+// allowance is pool x the mint's per-IP limit. Reloaded every 60s, no restart.
 //
 // Env: NEW_MINT (http://mint:3338), OLD_MINT (http://mint-old:3338),
 //      LOG_DIR (/demux), PORT (3341)
@@ -84,7 +94,39 @@ function rememberOldMelt(newId: string, oldId: string) {
   try { writeFileSync(MFILE, JSON.stringify(oldMelts)); } catch {}
 }
 
-console.log(`mintdemux on :${PORT}  NEW=${NEW} OLD=${OLD}  new=[${[...newKeysets]}] old=[${[...oldKeysets]}]`);
+// --- client-ip forwarding + partner whitelist ---
+const WFILE = `${DIR}/whitelist.json`;
+let wlIps = new Set<string>();
+let wlPool = 10;
+function loadWhitelist() {
+  if (!existsSync(WFILE)) return;
+  const j = parse(readFileSync(WFILE, "utf8"));
+  if (!j) return;
+  if (Array.isArray(j.ips)) wlIps = new Set(j.ips.map((s: any) => String(s).toLowerCase()));
+  if (Number.isFinite(j.pool) && j.pool >= 1) wlPool = Math.floor(j.pool);
+}
+loadWhitelist();
+setInterval(loadWhitelist, 60_000);
+
+const wlCounters: Record<string, number> = {};
+function bucketKey(req: Request): string {
+  const ip = (
+    req.headers.get("cf-connecting-ip") ||
+    (req.headers.get("x-forwarded-for") || "").split(",")[0].trim()
+  ).toLowerCase();
+  if (!ip || !wlIps.has(ip)) return ip;
+  const n = (wlCounters[ip] = ((wlCounters[ip] || 0) + 1) % wlPool);
+  return `${ip}#${n}`;
+}
+// headers for an upstream fetch: json content-type when a body is sent, and
+// the client bucket key as cf-connecting-ip (checked first by the mint's
+// rate limiter; the raw socket IP is used when we have nothing to forward)
+const fwd = (key: string, hasBody = false): Record<string, string> => ({
+  ...(hasBody ? { "content-type": "application/json" } : {}),
+  ...(key ? { "cf-connecting-ip": key } : {}),
+});
+
+console.log(`mintdemux on :${PORT}  NEW=${NEW} OLD=${OLD}  new=[${[...newKeysets]}] old=[${[...oldKeysets]}]  whitelist=[${[...wlIps]}] pool=${wlPool}`);
 
 const keysetsInBody = (body: any): string[] => {
   const ids = new Set<string>();
@@ -94,18 +136,27 @@ const keysetsInBody = (body: any): string[] => {
 const respond = (upstream: Response, text: string) =>
   new Response(text, { status: upstream.status, headers: { ...CORS, "content-type": upstream.headers.get("content-type") || "application/json" } });
 
-async function proxy(base: string, method: string, path: string, body?: ArrayBuffer | string): Promise<Response> {
-  const r = await fetch(`${base}${path}`, { method, headers: body != null ? { "content-type": "application/json" } : undefined, body: body as any });
+async function proxy(base: string, method: string, path: string, body?: ArrayBuffer | string, headers?: Record<string, string>): Promise<Response> {
+  const r = await fetch(`${base}${path}`, { method, headers, body: body as any });
   return respond(r, await r.text());
 }
 
+const WSNEW = NEW.replace(/^http/, "ws");
+type WsData = { key: string; up?: WebSocket; q: (string | Uint8Array)[] };
+
 Bun.serve({
   port: PORT, hostname: "0.0.0.0", idleTimeout: 0,
-  async fetch(req) {
+  async fetch(req, server) {
     const url = new URL(req.url);
     const path = url.pathname;
     const ps = path + url.search;
     if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+    const key = bucketKey(req);
+
+    if (path === "/v1/ws") {
+      if (server.upgrade(req, { data: { key, q: [] } as WsData })) return undefined as any;
+      return new Response(JSON.stringify({ detail: "websocket upgrade required" }), { status: 400, headers: J });
+    }
 
     // --- GET routes ---
     if (req.method === "GET") {
@@ -122,15 +173,15 @@ Bun.serve({
         return new Response(JSON.stringify({ keysets }), { headers: J });
       }
       const km = path.match(/^\/v1\/keys\/(.+)$/);
-      if (km) return proxy(oldKeysets.has(km[1]) ? OLD : NEW, "GET", ps);
+      if (km) return proxy(oldKeysets.has(km[1]) ? OLD : NEW, "GET", ps, undefined, fwd(key));
       const qm = path.match(/^\/v1\/melt\/quote\/bolt11\/([^/]+)$/);
       if (qm && oldMelts[qm[1]]) {
-        const r = await fetch(`${OLD}/v1/melt/quote/bolt11/${oldMelts[qm[1]].old}`);
+        const r = await fetch(`${OLD}/v1/melt/quote/bolt11/${oldMelts[qm[1]].old}`, { headers: fwd(key) });
         const txt = await r.text(); const j = parse(txt);
         if (j?.quote) j.quote = qm[1]; // caller knows its own id, not OLD's
         return new Response(j ? JSON.stringify(j) : txt, { status: r.status, headers: J });
       }
-      return proxy(NEW, "GET", ps); // /v1/info, /v1/keys, anything else GET
+      return proxy(NEW, "GET", ps, undefined, fwd(key)); // /v1/info, /v1/keys, anything else GET
     }
 
     // --- POST routes ---
@@ -139,8 +190,8 @@ Bun.serve({
 
     if (path === "/v1/checkstate") {
       const [rn, ro] = await Promise.all([
-        fetch(`${NEW}/v1/checkstate`, { method: "POST", headers: { "content-type": "application/json" }, body: raw }).then(r => r.json()).catch(() => ({ states: [] })),
-        fetch(`${OLD}/v1/checkstate`, { method: "POST", headers: { "content-type": "application/json" }, body: raw }).then(r => r.json()).catch(() => ({ states: [] })),
+        fetch(`${NEW}/v1/checkstate`, { method: "POST", headers: fwd(key, true), body: raw }).then(r => r.json()).catch(() => ({ states: [] })),
+        fetch(`${OLD}/v1/checkstate`, { method: "POST", headers: fwd(key, true), body: raw }).then(r => r.json()).catch(() => ({ states: [] })),
       ]);
       const byY: Record<string, any> = {};
       for (const s of [...((rn as any).states || []), ...((ro as any).states || [])]) { const cur = byY[s.Y]; if (!cur || s.state === "SPENT") byY[s.Y] = s; }
@@ -148,7 +199,7 @@ Bun.serve({
     }
 
     if (path === "/v1/melt/quote/bolt11") {
-      const r = await fetch(`${NEW}/v1/melt/quote/bolt11`, { method: "POST", headers: { "content-type": "application/json" }, body: raw });
+      const r = await fetch(`${NEW}/v1/melt/quote/bolt11`, { method: "POST", headers: fwd(key, true), body: raw });
       const txt = await r.text(); const j = parse(txt);
       if (r.ok && j?.quote && body?.request) rememberQuote(j.quote, { invoice: body.request, unit: body.unit || "sat", ts: Date.now() });
       return respond(r, txt);
@@ -165,7 +216,7 @@ Bun.serve({
         const info = quoteMem[body.quote];
         if (!info) { log(`melt->OLD refused (quote unknown/expired) keysets=${ids.join(",")} ip=${ip}`); return new Response(JSON.stringify({ detail: "Melt quote expired or unknown for old-ecash recovery; request a new melt quote and try again.", code: 12004 }), { status: 400, headers: J }); }
         // re-quote on OLD for the same invoice, then execute there (panic mode gates it)
-        const oq = await fetch(`${OLD}/v1/melt/quote/bolt11`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ request: info.invoice, unit: info.unit }) });
+        const oq = await fetch(`${OLD}/v1/melt/quote/bolt11`, { method: "POST", headers: fwd(key, true), body: JSON.stringify({ request: info.invoice, unit: info.unit }) });
         const oqt = await oq.text(); const oqj = parse(oqt);
         if (!oq.ok || !oqj?.quote) { log(`OLD re-quote failed for melt: ${oqt.slice(0, 120)}`); return respond(oq, oqt); }
         rememberOldMelt(String(body.quote), String(oqj.quote));
@@ -173,17 +224,38 @@ Bun.serve({
         // which OLD doesn't know and rejects before even reading the proofs
         // ("keyset id unknown"). Recovery melts forfeit fee-return change.
         const { outputs, ...bodyNoChange } = body;
-        const r = await fetch(`${OLD}/v1/melt/bolt11`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...bodyNoChange, quote: oqj.quote }) });
+        const r = await fetch(`${OLD}/v1/melt/bolt11`, { method: "POST", headers: fwd(key, true), body: JSON.stringify({ ...bodyNoChange, quote: oqj.quote }) });
         const txt = await r.text(); const j = parse(txt);
         log(`melt->OLD(recovery) keysets=${ids.join(",")} status=${r.status} ip=${ip}${outputs ? " outputs-stripped" : ""}`);
         if (j?.quote) { j.quote = String(body.quote); return new Response(JSON.stringify(j), { status: r.status, headers: J }); }
         return respond(r, txt);
       }
       // new (or unknown) keysets -> NEW
-      return proxy(NEW, "POST", ps, raw);
+      return proxy(NEW, "POST", ps, raw, fwd(key, true));
     }
 
     // swap, mint, mint/quote, restore, everything else -> NEW (normal ops)
-    return proxy(NEW, "POST", ps, raw);
+    return proxy(NEW, "POST", ps, raw, fwd(key, true));
+  },
+  // --- /v1/ws: pipe each client websocket to its own upstream connection on
+  // NEW, forwarding the bucket key so the mint's ws limiter sees the client ---
+  websocket: {
+    open(ws) {
+      const data = ws.data as WsData;
+      const up = new WebSocket(`${WSNEW}/v1/ws`, { headers: fwd(data.key) } as any);
+      data.up = up;
+      up.onopen = () => { for (const m of data.q) up.send(m); data.q = []; };
+      up.onmessage = (e) => { try { ws.send(e.data as any); } catch {} };
+      up.onclose = () => { try { ws.close(); } catch {} };
+      up.onerror = () => { try { ws.close(); } catch {} };
+    },
+    message(ws, msg) {
+      const data = ws.data as WsData;
+      if (data.up && data.up.readyState === 1) data.up.send(msg as any);
+      else data.q.push(msg as any);
+    },
+    close(ws) {
+      try { (ws.data as WsData).up?.close(); } catch {}
+    },
   },
 });
