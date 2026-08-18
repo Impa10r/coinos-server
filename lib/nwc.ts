@@ -367,8 +367,40 @@ export default () => {
           } catch {}
         }
       } catch (e) {
-        // Stale client state (deleted app or migrated user) is not a server fault — don't log.
-        if (e.message === "pubkey not found" || e.message === "user not found") return;
+        // Stale client state (deleted app or migrated user) is not a server
+        // fault — don't log it, but DO answer: a NIP-47 UNAUTHORIZED reply
+        // lets the client surface an error instead of spinning forever on a
+        // connection this server no longer knows. `pubkey`/`sk` from the try
+        // block above aren't visible here, so re-derive them from `ev`
+        // directly (decryption already succeeded by the time this can throw).
+        if (e.message === "pubkey not found" || e.message === "user not found") {
+          try {
+            const pk = ev.tags.find((t) => t[0] === "p")[1];
+            const sk = serverKeys[pk];
+            const isNip44 = ev.tags.some(
+              (t: string[]) => t[0] === "encryption" && t[1] === "nip44_v2",
+            );
+            const payload = JSON.stringify({
+              result_type: "unknown",
+              error: { code: "UNAUTHORIZED", message: "unknown connection" },
+            });
+            const content = isNip44
+              ? nip44.v2.encrypt(payload, nip44.v2.utils.getConversationKey(hexToBytes(sk), ev.pubkey))
+              : await nip04.encrypt(sk, ev.pubkey, payload);
+            const tags: string[][] = [["p", ev.pubkey], ["e", ev.id]];
+            if (isNip44) tags.push(["encryption", "nip44_v2"]);
+            let response: UnsignedEvent = {
+              created_at: Math.floor(Date.now() / 1000),
+              kind: 23195,
+              pubkey: serverPubkey,
+              tags,
+              content,
+            };
+            response = await finalizeEvent(response, hexToBytes(sk));
+            r.send(["EVENT", response]);
+          } catch (_) {}
+          return;
+        }
         err("problem with nwc", e.message);
       }
     });

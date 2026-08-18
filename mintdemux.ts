@@ -144,7 +144,7 @@ async function proxy(base: string, method: string, path: string, body?: ArrayBuf
 const WSNEW = NEW.replace(/^http/, "ws");
 type WsData = { key: string; up?: WebSocket; q: (string | Uint8Array)[] };
 
-Bun.serve({
+Bun.serve<WsData>({
   port: PORT, hostname: "0.0.0.0", idleTimeout: 0,
   async fetch(req, server) {
     const url = new URL(req.url);
