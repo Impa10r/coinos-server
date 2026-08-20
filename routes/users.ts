@@ -1281,7 +1281,8 @@ export default {
       }),
     );
 
-    app.nwc = `nostr+walletconnect://${serverPubkey2}?relay=${relay}&secret=${app.secret}&lud16=${lud16}`;
+    if (app.secret)
+      app.nwc = `nostr+walletconnect://${serverPubkey2}?relay=${relay}&secret=${app.secret}&lud16=${lud16}`;
     app.payments = payments.filter((p) => p);
 
     return c.json(app);
@@ -1338,15 +1339,23 @@ export default {
         name,
         notify,
         uid,
-        secret,
       };
+      delete app.secret;
 
       if (!app?.created) app.created = Date.now();
 
       await s(`app:${pubkey}`, app);
       await db.sAdd(`${uid}:apps`, pubkey);
 
-      return c.json({});
+      // The client secret is never persisted (NIP-47 only requires the
+      // pubkey server-side) — hand back the connection URI once so the
+      // frontend can show/copy it now; it can't be reconstructed later.
+      const lud16 = `${user.username}@${host}`;
+      const nwc = secret
+        ? `nostr+walletconnect://${serverPubkey2}?relay=${relay}&secret=${secret}&lud16=${lud16}`
+        : undefined;
+
+      return c.json({ nwc });
     } catch (e) {
       console.log(e);
       return bail(c, e.message);

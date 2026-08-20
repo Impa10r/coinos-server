@@ -1,8 +1,12 @@
 import { SquareEnvironment } from "square";
 
 export default {
-  archive: "redis://arc:6380",
-  db: "redis://db",
+  // SECURITY: db/archive have no auth by default — set DB_PASSWORD (and
+  // matching --requirepass in compose.yml) before exposing these anywhere
+  // reachable; a stolen dataset here is signing authority over every NWC
+  // connection (see routes/users.ts updateApp).
+  archive: `redis://:${process.env.DB_PASSWORD}@arc:6380`,
+  db: `redis://:${process.env.DB_PASSWORD}@db`,
   nostr: "wss://relay.coinos.io",
   relays: [
     "wss://relay.coinos.io",

@@ -26,3 +26,6 @@ req*
 logs/balances.log
 .vscode/tasks.json
 logs/
+*.bak
+*.bak-*
+*.js.map

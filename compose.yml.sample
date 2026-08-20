@@ -33,6 +33,7 @@ services:
     environment:
       URL: http://localhost:5173
       LNURL_PROXY: socks5h://tor:9050
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env - see .env.sample}
     ports:
       - '3119:3119'
     volumes:
@@ -107,8 +108,8 @@ services:
     image: valkey/valkey:8.0
     container_name: db
     ports:
-      - '6379:6379'
-    command: ["valkey-server", "/etc/valkey/valkey.conf"]
+      - '127.0.0.1:6379:6379'
+    command: ["valkey-server", "/etc/valkey/valkey.conf", "--requirepass", "${DB_PASSWORD:?Set DB_PASSWORD in .env - see .env.sample}"]
     volumes:
       - ./data/db:/data
       - ./data/db/valkey.conf:/etc/valkey/valkey.conf
@@ -117,8 +118,8 @@ services:
     image: apache/kvrocks
     container_name: arc
     ports:
-      - '6380:6379'
-    entrypoint: ["kvrocks", "-c", "/data/kvrocks.conf", "--dir", "/data", "--bind", "0.0.0.0"]
+      - '127.0.0.1:6380:6379'
+    entrypoint: ["kvrocks", "-c", "/data/kvrocks.conf", "--dir", "/data", "--bind", "0.0.0.0", "--requirepass", "${DB_PASSWORD:?Set DB_PASSWORD in .env - see .env.sample}"]
     volumes:
       - ./data/archive-kv:/data
     restart: always
