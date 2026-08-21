@@ -2,12 +2,16 @@
 # TigerBeetle query utilities for coinos-server
 # Source this file: source scripts/tb.sh
 
+_TB_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+[ -f "$_TB_SCRIPT_DIR/../.env" ] && set -a && source "$_TB_SCRIPT_DIR/../.env" && set +a
+_VALKEY="valkey-cli -a ${DB_PASSWORD:?Set DB_PASSWORD in .env} --no-auth-warning"
+
 # Get user UUID from Redis by username
 _user_id() {
   local username="$1"
-  docker exec db valkey-cli GET "user:$username" | tr -d '"' | while read key; do
+  docker exec db $_VALKEY GET "user:$username" | tr -d '"' | while read key; do
     if [[ "$key" =~ ^[0-9a-f-]{36}$ ]]; then
-      docker exec db valkey-cli GET "user:$key" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['id'])"
+      docker exec db $_VALKEY GET "user:$key" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['id'])"
     else
       echo "$key" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['id'])" 2>/dev/null || echo "$key"
     fi

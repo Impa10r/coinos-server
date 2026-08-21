@@ -4,8 +4,11 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+[ -f "$SCRIPT_DIR/../.env" ] && set -a && source "$SCRIPT_DIR/../.env" && set +a
+
 # Collect all fund names from Redis (union of all user:*:funds sets)
-FUND_NAMES=$(docker exec db valkey-cli --no-auth-warning \
+FUND_NAMES=$(docker exec db valkey-cli -a "${DB_PASSWORD:?Set DB_PASSWORD in .env}" --no-auth-warning \
   EVAL "
     local keys = redis.call('KEYS', 'user:*:funds')
     local names = {}

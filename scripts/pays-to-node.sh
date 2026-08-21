@@ -11,15 +11,19 @@ set -euo pipefail
 
 DEST="${1:?Usage: $0 <node_pubkey>}"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+[ -f "$SCRIPT_DIR/../.env" ] && set -a && source "$SCRIPT_DIR/../.env" && set +a
+REDIS="docker exec db redis-cli -a ${DB_PASSWORD:?Set DB_PASSWORD in .env} --no-auth-warning"
+
 docker exec cl lightning-cli --lightning-dir=/app/lightning listpays \
   | jq -r --arg d "$DEST" '.pays[]
       | select(.destination==$d and .status=="complete")
       | "\(.bolt11)\t\(.amount_sent_msat)\t\(.completed_at)"' \
   | while IFS=$'\t' read -r bolt11 sent ts; do
-      pid=$(docker exec db redis-cli GET "payment:$bolt11" 2>/dev/null | tr -d '"')
+      pid=$($REDIS GET "payment:$bolt11" 2>/dev/null | tr -d '"')
       if [ -n "$pid" ] && [ "$pid" != "(nil)" ]; then
-        uid=$(docker exec db redis-cli GET "payment:$pid" | jq -r .uid)
-        user=$(docker exec db redis-cli GET "user:$uid" | jq -r '.username // "(deleted)"')
+        uid=$($REDIS GET "payment:$pid" | jq -r .uid)
+        user=$($REDIS GET "user:$uid" | jq -r '.username // "(deleted)"')
       else
         uid="(none)"
         user="(reversed?)"

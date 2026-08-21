@@ -13,8 +13,9 @@ docker exec app bun -e "
   const uuid  = '$UUID';
   const limit = $LIMIT;
 
-  const db  = createClient({ url: 'redis://db' });
-  const arc = createClient({ url: 'redis://arc:6380' });
+  const pass = process.env.DB_PASSWORD;
+  const db  = createClient({ url: 'redis://:' + pass + '@db' });
+  const arc = createClient({ url: 'redis://:' + pass + '@arc:6380' });
   await Promise.all([db.connect(), arc.connect()]);
 
   const get = async (key) => {

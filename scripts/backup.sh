@@ -13,6 +13,8 @@ TARGET_HOME="${TARGET_HOME:?Set TARGET_HOME=/home/user}"
 BASE="${HOME}/coinos-server/data"
 DEST="${BACKUP_HOST}:${TARGET_HOME}/coinos-server/data"
 
+[ -f "${HOME}/coinos-server/.env" ] && set -a && source "${HOME}/coinos-server/.env" && set +a
+
 # --- TigerBeetle: pause → copy → unpause (pause lasts <1s) ---
 STAGE="/tmp/tb-snapshot/0_0.tigerbeetle"
 mkdir -p "$(dirname "$STAGE")"
@@ -22,7 +24,7 @@ docker unpause tb
 rsync -az --inplace "$STAGE" "${DEST}/tigerbeetle/"
 
 # --- Valkey: request a background save, then rsync ---
-docker exec db valkey-cli BGSAVE SCHEDULE 2>/dev/null || true
+docker exec db valkey-cli -a "${DB_PASSWORD:?Set DB_PASSWORD in .env}" --no-auth-warning BGSAVE SCHEDULE 2>/dev/null || true
 rsync -az --delete "${BASE}/db/" "${DEST}/db/"
 
 # --- Kvrocks ---
