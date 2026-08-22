@@ -1395,6 +1395,10 @@ export default {
     const pubkey = c.req.param("pubkey");
     const user = c.get("user");
     const app = await g(`app:${pubkey}`);
+    // Missing records must 404, not crash into a 500: clients (Damus one-click
+    // setup) probe this endpoint and treat 404 as "not configured yet, create
+    // one" — anything else aborts their whole connection flow.
+    if (!app) return c.json({ error: "connection not found" }, 404);
     if (app.uid !== user.id) fail("unauthorized");
 
     const lud16 = `${user.username}@${host}`;
@@ -1419,7 +1423,11 @@ export default {
   async apps(c) {
     const user = c.get("user");
     const pubkeys = [...(await db.sMembers(`${user.id}:apps`))];
-    const apps = await Promise.all(pubkeys.map((p) => g(`app:${p}`)));
+    // Drop set members whose app record was deleted (e.g. an invalidation
+    // sweep) so one stale pubkey can't 500 the whole listing.
+    const apps = (await Promise.all(pubkeys.map((p) => g(`app:${p}`)))).filter(
+      Boolean,
+    );
 
     const lud16 = `${user.username}@${host}`;
 
@@ -1460,6 +1468,27 @@ export default {
       // authenticated user to overwrite another connection's configuration.
       let app = await g(`app:${pubkey}`);
       if (app && uid !== app.uid) fail("Unauthorized");
+
+      // Rotation is mandatory after a credential disclosure: the NWC pubkey is
+      // derived from the bearer secret, so re-registering a retired or
+      // quarantined pubkey would re-authorize the exact secret that was
+      // disclosed (we store client-supplied secrets, so they're part of any DB
+      // leak). Reject it and make the client mint a fresh secret — a new secret
+      // yields a new pubkey and never trips this check.
+      const credentialCutoff = Number(await g("nwc:credential-cutoff")) || 0;
+      const retired =
+        (app &&
+          credentialCutoff > 0 &&
+          (!Number(app.created) || Number(app.created) < credentialCutoff)) ||
+        (await db.sIsMember("nwc:quarantined", pubkey));
+      if (retired)
+        return c.json(
+          {
+            error:
+              "This connection's key was retired for security reasons; connect again with a newly generated secret",
+          },
+          403,
+        );
 
       const validRenewals = new Set([
         "daily",
@@ -1502,7 +1531,10 @@ export default {
       };
       delete app.secret;
 
-      if (!app?.created) app.created = Date.now();
+      // Refresh the creation epoch on every owner post: this record passed the
+      // retirement check above, so the owner updating it (or minting it fresh)
+      // asserts it's live and keeps it clear of the credential cutoff.
+      app.created = Date.now();
 
       await s(`app:${pubkey}`, app);
       await db.sAdd(`${uid}:apps`, pubkey);
