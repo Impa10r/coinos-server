@@ -1,4 +1,6 @@
 import ln, { LightningUnavailableError } from "$lib/ln";
+import { g } from "$lib/db";
+import { getLightningListenerStatus } from "$lib/lightning";
 import { err, l, warn } from "$lib/logging";
 
 const HEALTH_CHECK_INTERVAL = 2 * 60 * 1000; // 2 minutes
@@ -9,6 +11,7 @@ let consecutiveFailures = 0;
 let lastSuccessTime = Date.now();
 let lastFailureReason = "";
 let checkTimer: ReturnType<typeof setTimeout> | null = null;
+let listenerBacklogPayIndex: number | null = null;
 
 export function getHealthStatus() {
   return {
@@ -17,10 +20,16 @@ export function getHealthStatus() {
     lastFailureReason,
     healthy: consecutiveFailures < MAX_CONSECUTIVE_FAILURES,
     stalledCheck: checkTimer === null && consecutiveFailures > 0,
+    listenerBacklogPayIndex,
+    listener: getLightningListenerStatus(),
   };
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
     promise.then(
@@ -70,6 +79,27 @@ async function checkLightningHealth(): Promise<boolean> {
         "delinvoice",
       );
     } catch {}
+
+    // A responsive CLN node is not sufficient: the dedicated receive listener
+    // can be wedged while getinfo/invoice still work. Probe one index beyond the
+    // durable cursor. Code 904 means no backlog and is the healthy outcome.
+    const payIndex = Number((await g("pay_index")) || 0);
+    listenerBacklogPayIndex = null;
+    try {
+      const waiting = (await withTimeout(
+        ln.waitanyinvoice(payIndex, 1),
+        5_000,
+        "listener backlog probe",
+      )) as any;
+      if (Number(waiting?.pay_index) > payIndex) {
+        listenerBacklogPayIndex = Number(waiting.pay_index);
+        throw new Error(
+          `lightning listener backlog: stored=${payIndex} next=${waiting.pay_index}`,
+        );
+      }
+    } catch (e: any) {
+      if (Number(e?.code ?? e?.errno) !== 904) throw e;
+    }
 
     // l(`health check: passed in ${Date.now() - startTime}ms, node: ${info.id.slice(0, 16)}...`);
 

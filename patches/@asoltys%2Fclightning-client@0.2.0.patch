@@ -1,11 +1,14 @@
+diff --git a/node_modules/@asoltys/clightning-client/.bun-tag-a0580d1ef1abb386 b/.bun-tag-a0580d1ef1abb386
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/index.js b/index.js
-index 968489c..4d96c34 100644
+index a03fe100f92bb0852c54986bf032e18a4292191f..fa3ba067296d19980061a2bb1e40876381a56cf2 100644
 --- a/index.js
 +++ b/index.js
-@@ -42,7 +42,31 @@ class LightningClient extends EventEmitter {
+@@ -41,7 +41,31 @@ class LightningClient extends EventEmitter {
  		this.reconnectTimeout = null;
  		this.reqcount = 0;
-
+ 
 -		this.client = net.createConnection(rpcPath);
 +		this._setup();
 +	}
@@ -33,11 +36,11 @@ index 968489c..4d96c34 100644
 +
 +		this.client = net.createConnection(this.rpcPath);
  		this.rl = readline.createInterface({ input: this.client });
-
+ 
  		this.clientConnectionPromise = new Promise((resolve) => {
-@@ -87,8 +111,15 @@ class LightningClient extends EventEmitter {
+@@ -102,8 +126,15 @@ class LightningClient extends EventEmitter {
  		}
-
+ 
  		this.reconnectTimeout = setTimeout(() => {
 -			this.client.connect(this.rpcPath);
 +			// Clear the guard BEFORE (re)connecting so a throw can't leave it set
@@ -51,4 +54,4 @@ index 968489c..4d96c34 100644
 +			}
  		}, this.reconnectWait * 1000);
  	}
-
+ 
