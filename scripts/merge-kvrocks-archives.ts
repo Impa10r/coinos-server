@@ -5,7 +5,13 @@
 // a raw command because Kvrocks cursors can exceed JavaScript's safe integer
 // range and node-redis' high-level scan helper rounds them.
 
-import { createClient, type RedisClientType } from "redis";
+import { createClient, RESP_TYPES, type RedisClientType } from "redis";
+
+// node-redis v5 replaced the v4 `{ returnBuffers: true }` command option with a
+// typeMapping that maps a RESP wire type to a JS constructor. This maps
+// blob strings (GET/LRANGE element replies) to Buffer, matching the old
+// returnBuffers behavior — needed here for byte-exact comparison/copy.
+const BUFFER_OPTS = { typeMapping: { [RESP_TYPES.BLOB_STRING]: Buffer } };
 
 const valueOption = (name: string) =>
   process.argv
@@ -77,36 +83,32 @@ const concurrentMap = async <T>(
 };
 
 const valuesMatch = async (
-  left: RedisClientType,
-  right: RedisClientType,
+  left: any,
+  right: any,
   key: string,
   type: string,
 ) => {
   if ((await right.type(key)) !== type) return false;
   if (type === "string") {
-    const [leftValue, rightValue] = await Promise.all([
-      left.sendCommand<Buffer | null>(["GET", key], { returnBuffers: true }),
-      right.sendCommand<Buffer | null>(["GET", key], { returnBuffers: true }),
+    const [leftValue, rightValue]: (Buffer | null)[] = await Promise.all([
+      left.sendCommand(["GET", key], BUFFER_OPTS),
+      right.sendCommand(["GET", key], BUFFER_OPTS),
     ]);
     return (
       leftValue !== null &&
       rightValue !== null &&
-      Buffer.from(leftValue).equals(Buffer.from(rightValue))
+      leftValue.equals(rightValue)
     );
   }
   if (type === "list") {
-    const [leftValues, rightValues] = await Promise.all([
-      left.sendCommand<Buffer[]>(["LRANGE", key, "0", "-1"], {
-        returnBuffers: true,
-      }),
-      right.sendCommand<Buffer[]>(["LRANGE", key, "0", "-1"], {
-        returnBuffers: true,
-      }),
+    const [leftValues, rightValues]: Buffer[][] = await Promise.all([
+      left.sendCommand(["LRANGE", key, "0", "-1"], BUFFER_OPTS),
+      right.sendCommand(["LRANGE", key, "0", "-1"], BUFFER_OPTS),
     ]);
     return (
       leftValues.length === rightValues.length &&
       leftValues.every((value, index) =>
-        Buffer.from(value).equals(Buffer.from(rightValues[index])),
+        value.equals(rightValues[index]),
       )
     );
   }
@@ -141,7 +143,7 @@ try {
 
     if (countTypes) {
       await concurrentMap(keys, concurrency, async (key) => {
-        const type = await source.type(key);
+        const type = String(await source.type(key));
         typeCounts[type] = (typeCounts[type] || 0) + 1;
       });
     }
@@ -169,17 +171,13 @@ try {
 
         if (sourceType === "string") {
           const [sourceValue, verifyValue] = await Promise.all([
-            source.sendCommand<Buffer | null>(["GET", key], {
-              returnBuffers: true,
-            }),
-            verifier.sendCommand<Buffer | null>(["GET", key], {
-              returnBuffers: true,
-            }),
+            source.sendCommand<Buffer | null>(["GET", key], BUFFER_OPTS),
+            verifier.sendCommand<Buffer | null>(["GET", key], BUFFER_OPTS),
           ]);
           if (
             sourceValue === null ||
             verifyValue === null ||
-            !Buffer.from(sourceValue).equals(Buffer.from(verifyValue))
+            !sourceValue.equals(verifyValue)
           ) {
             if (verificationMismatches.length < 20) {
               verificationMismatches.push(`${key}: string value differs`);
@@ -188,18 +186,14 @@ try {
           }
         } else if (sourceType === "list") {
           const [sourceValues, verifyValues] = await Promise.all([
-            source.sendCommand<Buffer[]>(["LRANGE", key, "0", "-1"], {
-              returnBuffers: true,
-            }),
-            verifier.sendCommand<Buffer[]>(["LRANGE", key, "0", "-1"], {
-              returnBuffers: true,
-            }),
+            source.sendCommand<Buffer[]>(["LRANGE", key, "0", "-1"], BUFFER_OPTS),
+            verifier.sendCommand<Buffer[]>(["LRANGE", key, "0", "-1"], BUFFER_OPTS),
           ]);
           if (
             sourceValues.length !== verifyValues.length ||
             sourceValues.some(
               (value, index) =>
-                !Buffer.from(value).equals(Buffer.from(verifyValues[index])),
+                !value.equals(verifyValues[index]),
             )
           ) {
             if (verificationMismatches.length < 20) {
@@ -222,7 +216,7 @@ try {
     if (apply && target) {
       await concurrentMap(keys, concurrency, async (key) => {
         const [type, ttlRaw] = await Promise.all([
-          source.type(key),
+          source.type(key).then(String),
           source.sendCommand<string>(["PTTL", key]),
         ]);
         const ttl = Number(ttlRaw);
@@ -232,7 +226,7 @@ try {
         }
 
         if (skipEqual && (await valuesMatch(source, target, key, type))) {
-          const targetTtl = await target.pTTL(key);
+          const targetTtl = Number(await target.pTTL(key));
           const ttlMatches =
             (ttl === -1 && targetTtl === -1) ||
             (ttl > 0 && targetTtl > 0 && Math.abs(ttl - targetTtl) < 10_000);
@@ -243,9 +237,10 @@ try {
         }
 
         if (type === "string") {
-          const value = await source.sendCommand<Buffer | null>(["GET", key], {
-            returnBuffers: true,
-          });
+          const value = await source.sendCommand<Buffer | null>(
+            ["GET", key],
+            BUFFER_OPTS,
+          );
           if (value === null) {
             expiredDuringRead++;
             return;
@@ -257,7 +252,7 @@ try {
           while (true) {
             const values = await source.sendCommand<Buffer[]>(
               ["LRANGE", key, String(offset), String(offset + batchSize - 1)],
-              { returnBuffers: true },
+              BUFFER_OPTS,
             );
             if (!values.length) break;
             await target.sendCommand(["RPUSH", key, ...values]);

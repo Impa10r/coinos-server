@@ -13,14 +13,14 @@ export default async (c) => {
     const file = body.file || Object.values(body).find((v) => v instanceof File);
     if (!file) fail("no file uploaded");
 
-    let buf = Buffer.from(await (file as File).arrayBuffer());
+    let buf: Buffer<ArrayBufferLike> = Buffer.from(await (file as File).arrayBuffer());
 
     const [format, ext] = (await fileTypeFromBuffer(buf as any)).mime.split("/");
 
     if (format !== "image" && !["jpg", "jpeg", "png"].includes(ext)) fail("unsupported file type");
 
     const w = type === "banner" ? 1920 : 240;
-    buf = (await sharp(buf, { failOn: "none" }).rotate().resize(w).webp().toBuffer()) as Buffer;
+    buf = await sharp(buf, { failOn: "none" }).rotate().resize(w).webp().toBuffer();
 
     const hash = createHash("sha256")
       .update(buf as any)

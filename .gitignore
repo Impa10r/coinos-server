@@ -29,3 +29,15 @@ logs/
 *.bak
 *.bak-*
 *.js.map
+
+# Incident-response tooling & data — contain victim/attacker/collector identifiers;
+# keep out of the public repo (operational, local-only)
+/incident-*
+/scripts/refund-secured-incident-victims.ts
+/scripts/audit-incident-collectors.ts
+/scripts/audit-incident-refund-readiness.ts
+/scripts/account-recovery-confidence.ts
+/scripts/audit-remaining-secured-victim-outflows.ts
+
+# peerswap runtime artifacts
+/peerswap/
