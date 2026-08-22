@@ -1,4 +1,4 @@
-import { db, g, s } from "$lib/db";
+import { db, g } from "$lib/db";
 import ln, { lnListen, LightningUnavailableError } from "$lib/ln";
 import { err, l, warn } from "$lib/logging";
 import { handleZap } from "$lib/nostr";
@@ -8,18 +8,18 @@ import { getInvoice, getPayment, getUser } from "$lib/utils";
 
 const LISTENER_RETRY_DELAY = 5000; // 5 seconds
 const MAX_LISTENER_RETRIES = 10;
-// If the listener has been blocked in waitanyinvoice this long without the call
-// returning, AND cl is actually reachable, treat the socket as a zombie and
-// force-recycle it. Sized well above normal quiet periods (receives are sparse
-// but cl still responds to getinfo) so it only fires on a genuine stall.
-const LISTENER_STALL_MS = 5 * 60 * 1000; // 5 minutes
+// Never leave waitanyinvoice as an unbounded client-side promise. CLN's
+// server-side timeout returns code 904 during an ordinary quiet period; that is
+// treated as a clean re-arm below. A dead/half-open socket can therefore hold
+// the listener for at most the watchdog window instead of indefinitely.
+const LISTENER_WAIT_TIMEOUT_SECONDS = 30;
+const LISTENER_STALL_MS = 90 * 1000;
+const PROCESSING_STALL_MS = 5 * 60 * 1000;
 let listenerRetries = 0;
 let listenerActive = false;
 let lastPayTime = Date.now();
-// When the current waitanyinvoice call started — used by the watchdog to tell a
-// legitimately-quiet listener (recently armed) from a zombie (armed long ago,
-// never returned). Reset every time we (re)enter the wait.
-let waitStartedAt = Date.now();
+let listenerPhase: "idle" | "waiting" | "processing" = "idle";
+let phaseStartedAt = Date.now();
 // Incremented whenever the watchdog force-recycles a stalled listener. The
 // blocked invocation captures the epoch at entry; if it later unblocks (the
 // reset makes its waitanyinvoice reject) it sees the epoch has moved and bows
@@ -39,6 +39,7 @@ let recycleArmed = false;
   recycleArmed = true;
   listenerEpoch++;
   listenerActive = false;
+  listenerPhase = "idle";
   warn("lightning listener: listen socket dropped — recycling immediately");
   setTimeout(() => {
     recycleArmed = false;
@@ -53,14 +54,18 @@ export async function listenForLightning() {
   }
 
   listenerActive = true;
-  waitStartedAt = Date.now();
+  listenerPhase = "waiting";
+  phaseStartedAt = Date.now();
   const myEpoch = listenerEpoch;
 
   try {
     const payIndex = (await g("pay_index")) || 0;
     // l(`lightning listener: waiting for invoice (pay_index=${payIndex})`);
 
-    const inv = await lnListen.waitanyinvoice(payIndex);
+    const inv = await lnListen.waitanyinvoice(
+      payIndex,
+      LISTENER_WAIT_TIMEOUT_SECONDS,
+    );
     const {
       label,
       local_offer_id,
@@ -80,22 +85,19 @@ export async function listenForLightning() {
     // same invoice and handle it, so nothing is lost or double-credited.
     if (myEpoch !== listenerEpoch) return;
 
-    await s("pay_index", pay_index);
-    lastPayTime = Date.now();
-
-    // Reset retry counter on successful receive
-    if (listenerRetries > 0) {
-      l(`lightning listener: recovered after ${listenerRetries} retries`);
-    }
-    listenerRetries = 0;
-    listenerActive = false;
-
-    // Schedule next listen
-    setTimeout(listenForLightning);
-
+    // We are no longer blocked in waitanyinvoice. Track processing separately
+    // so the watchdog never resets a healthy socket merely because a ledger
+    // write or downstream notification is slow.
+    listenerPhase = "processing";
+    phaseStartedAt = Date.now();
     const received = Math.round(amount_received_msat / 1000);
 
-    try {
+    // Process the settlement before advancing pay_index. Advancing first loses
+    // the credit permanently if Valkey is loading/restarting between the cursor
+    // write and credit() (the 2026-08-15 gap at pay indexes 1057448-1057518).
+    // The inner function keeps intentional skips on the common commit path;
+    // genuine processing errors escape to the retry handler with the old cursor.
+    await (async () => {
       if (!preimage) return;
 
       // The mint (nutshell) shares this cl node, so waitanyinvoice also fires for
@@ -131,8 +133,9 @@ export async function listenForLightning() {
         }
       }
 
+      const paymentRequest = bolt11 || bolt12;
       await credit({
-        hash: bolt11 || bolt12,
+        hash: paymentRequest,
         amount: received,
         // A bolt12 payer note (e.g. nostr:nip177:<zap-intent-id>) identifies
         // this specific payment; the offer's own memo is just its static label
@@ -141,11 +144,39 @@ export async function listenForLightning() {
         type: bolt12 ? PaymentType.bolt12 : PaymentType.lightning,
         payment_hash,
       });
-    } catch (e) {
-      err("problem receiving lightning payment", e.message);
+
+      // credit() may decline a duplicate idempotency claim. Only advance the
+      // listener once the durable payment pointer proves the ledger write won.
+      if (!(await getPayment(paymentRequest)))
+        throw new Error(`lightning credit did not persist for ${paymentRequest}`);
+    })();
+
+    // db.set is awaited directly: s() is intentionally fire-and-forget and an
+    // `await s(...)` would not wait for Redis to persist the cursor.
+    await db.set("pay_index", JSON.stringify(pay_index));
+
+    // If the watchdog recycled this invocation while it was processing, the
+    // replacement listener owns scheduling. The credit is idempotent and the
+    // committed cursor lets that listener continue from the next settlement.
+    if (myEpoch !== listenerEpoch) return;
+
+    lastPayTime = Date.now();
+
+    // Reset retry counter only after both the ledger operation and cursor write
+    // have succeeded.
+    if (listenerRetries > 0) {
+      l(`lightning listener: recovered after ${listenerRetries} retries`);
     }
-  } catch (e: any) {
+    listenerRetries = 0;
     listenerActive = false;
+    listenerPhase = "idle";
+
+    // Schedule the next listen only after this settlement is durable.
+    setTimeout(listenForLightning);
+  } catch (e: any) {
+    const failedPhase = listenerPhase;
+    listenerActive = false;
+    listenerPhase = "idle";
 
     // If the watchdog already recycled us (its reset is what made this
     // waitanyinvoice reject), a fresh listener is running — don't retry or
@@ -155,8 +186,20 @@ export async function listenForLightning() {
     const errorCode = e?.code ?? e?.errno ?? "unknown";
     const errorMsg = e?.message ?? String(e);
 
+    // CLN error 904 is the expected result of a server-side wait timeout with
+    // no newly paid invoice. It proves the socket is responsive; immediately
+    // re-arm without incrementing the failure counter or emitting an error.
+    if (
+      failedPhase === "waiting" &&
+      (Number(errorCode) === 904 || /timed out/i.test(errorMsg))
+    ) {
+      listenerRetries = 0;
+      setTimeout(listenForLightning);
+      return;
+    }
+
     err(
-      `lightning listener: error waiting for invoice`,
+      `lightning listener: error handling invoice`,
       `code=${errorCode}`,
       `error=${errorMsg}`
     );
@@ -204,13 +247,25 @@ export async function ensureListenerAlive() {
     return;
   }
 
-  // Case 2: listener claims active. A long-blocked waitanyinvoice is NORMAL
-  // during quiet periods — the only way to tell a zombie socket from a healthy
-  // idle wait is whether cl actually has a paid invoice the listener is failing
-  // to pick up. (The original "blocked > 5min while cl alive" check false-fired
-  // every few minutes during normal quiet stretches and needlessly recycled the
-  // socket — see 2026-06-07.) So: only act if there's a real backlog.
-  if (Date.now() - waitStartedAt < LISTENER_STALL_MS) return;
+  // Processing and waiting are different failure modes. Resetting the listen
+  // socket cannot repair a slow credit and risks overlapping two processors.
+  // Surface it loudly for intervention, but leave the single owner intact.
+  const phaseAge = Date.now() - phaseStartedAt;
+  if (listenerPhase === "processing") {
+    if (phaseAge >= PROCESSING_STALL_MS) {
+      err(
+        `lightning listener: invoice processing stalled ${Math.round(
+          phaseAge / 1000,
+        )}s — not starting a concurrent processor`,
+      );
+    }
+    return;
+  }
+
+  // A normal quiet wait returns code 904 every 30 seconds and re-arms. Reaching
+  // this age means the dedicated socket itself is stuck. Confirm a real backlog
+  // over the main socket before recycling it.
+  if (listenerPhase !== "waiting" || phaseAge < LISTENER_STALL_MS) return;
 
   // Probe for a backlog: ask cl (on the MAIN socket, not the wedged listen one)
   // whether a paid invoice exists at or after the app's stored pay_index, using
@@ -233,7 +288,7 @@ export async function ensureListenerAlive() {
 
   err(
     `lightning listener: backlog detected while listener blocked ${Math.round(
-      (Date.now() - waitStartedAt) / 1000,
+      phaseAge / 1000,
     )}s — recycling listen socket`,
   );
   // Bump the epoch first so the wedged invocation bows out when its
@@ -243,7 +298,18 @@ export async function ensureListenerAlive() {
     (lnListen as any).reset?.();
   } catch (_) {}
   listenerActive = false;
+  listenerPhase = "idle";
   setTimeout(listenForLightning);
+}
+
+export function getLightningListenerStatus() {
+  return {
+    active: listenerActive,
+    phase: listenerPhase,
+    phaseAgeMs: Date.now() - phaseStartedAt,
+    lastPayTime,
+    retries: listenerRetries,
+  };
 }
 
 export async function replay(index) {

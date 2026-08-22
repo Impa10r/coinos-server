@@ -30,7 +30,7 @@ try {
   catchUp();
   nwc();
   check();
-  // startHealthCheck();
+  startHealthCheck();
 } catch (e) {}
 
 setTimeout(listenForLightning, 2000);
