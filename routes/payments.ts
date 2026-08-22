@@ -620,6 +620,16 @@ export default {
       }
       const { confirmations, details } = tx;
 
+      // Change-recredit guard (2026-08-18). If our own wallet contributed inputs
+      // to this transaction, a "send" detail is present. In that case every
+      // receive output is our own CHANGE or an internal move — never an external
+      // deposit — so it must not be credited: doing so mints phantom balance
+      // (the withdrawal-change re-credit exploit that drove the L-C creep). A
+      // genuine coinos->coinos transfer is settled off-chain in the send path
+      // (credit() resolves getInvoice(hash) and books an internal transfer), so
+      // an on-chain receive funded by our own spend is only ever change.
+      const weSpent = details.some((d: any) => d.category === "send");
+
       for (const { address, amount, asset, category, vout } of details) {
         if (!address) continue;
         if (category === "send") continue;
@@ -632,6 +642,16 @@ export default {
         }
         // Bitcoin tx details have no `asset` field — every non-send output
         // is a BTC receive, nothing to filter.
+
+        // See weSpent above: a receive output on a transaction our wallet funded
+        // is change, not a deposit. Skip it so we never re-credit our own funds.
+        // Log the blocked amount as a tripwire: sums the phantom credit prevented
+        // and surfaces any continued exploitation attempts.
+        if (weSpent) {
+          if (sats(amount) >= 300)
+            warn("blocked change re-credit", txid, vout, sats(amount), address);
+          continue;
+        }
 
         const p = await getPayment(`${txid}:${vout}`);
 
