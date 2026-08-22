@@ -348,11 +348,11 @@ export default {
         );
         if (r.ok) {
           const j = await r.json();
-          if (j?.names?.[name]) return res.send({ names: { [name]: j.names[name] } });
+          if (j?.names?.[name]) return c.json({ names: { [name]: j.names[name] } });
         }
       } catch {}
       const u = await getUser(name, fields);
-      if (!u) return res.send({ names: {} }); // unknown name: empty per NIP-05, not a 500
+      if (!u) return c.json({ names: {} }); // unknown name: empty per NIP-05, not a 500
       names = { [name]: u.pubkey };
     } else {
       const records = await db.sMembers("nip5");

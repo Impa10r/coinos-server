@@ -69,6 +69,23 @@ const withBudgetLock = async <T>(key: string, fn: () => Promise<T>): Promise<T> 
   }
 };
 const budgetedMethods = new Set(["pay_invoice", "pay", "pay_keysend"]);
+const nwcDormancyWindow = 30 * 24 * 60 * 60 * 1000;
+
+const isDormantNwcApp = async (app) => {
+  const cutoff = Date.now() - nwcDormancyWindow;
+  let lastActivity = Number(app.created) || 0;
+
+  // Payment indexes are newest-first. Check a few entries because an archived
+  // or missing record must not make a recently active connection look dormant.
+  const pids = await db.lRange(`${app.pubkey}:payments`, 0, 19);
+  for (const pid of pids) {
+    const payment = await gf(`payment:${pid}`);
+    if (payment?.created)
+      lastActivity = Math.max(lastActivity, Number(payment.created));
+  }
+
+  return lastActivity < cutoff;
+};
 
 export default () => {
   let r: any;
@@ -294,7 +311,46 @@ export default () => {
 
         l("nwc method", method, "pubkey", pubkey.slice(0, 8), "params", JSON.stringify(params));
 
+        // Reply helper closing over this event's scheme/keys — used by every
+        // reply from here on (containment checks, success, and errors) so they
+        // all encrypt/tag consistently with whatever the request used.
+        const reply = async (payloadObj: any) => {
+          const payload = JSON.stringify(payloadObj);
+          const convKey = nip44.v2.utils.getConversationKey(skBytes, pubkey);
+          content = isNip44 ? nip44.v2.encrypt(payload, convKey) : await nip04.encrypt(sk, pubkey, payload);
+          const tags: string[][] = [
+            ["p", pubkey],
+            ["e", ev.id],
+          ];
+          if (isNip44) tags.push(["encryption", "nip44_v2"]);
+          let response: UnsignedEvent = {
+            created_at: Math.floor(Date.now() / 1000),
+            kind: 23195,
+            pubkey: serverPubkey,
+            tags,
+            content,
+          };
+          response = await finalizeEvent(response, hexToBytes(sk));
+          r.send(["EVENT", response]);
+        };
+
         if (!methods.includes(method)) return;
+
+        // Incident kill switch. NWC connection secrets are long-lived bearer
+        // credentials; if they may have been disclosed, a ledger hard-freeze is
+        // too broad to leave on indefinitely and per-app deletion is both slow and
+        // destructive. This flag makes every NWC method fail closed while keeping
+        // the connection records available for deliberate rotation/recovery.
+        if (await g("nwc:disabled")) {
+          await reply({
+            result_type: method,
+            error: {
+              code: "INTERNAL",
+              message: "NWC is temporarily disabled",
+            },
+          });
+          return;
+        }
 
         try {
           const app = await g(`app:${pubkey}`);
@@ -304,6 +360,71 @@ export default () => {
           }
           const user = await g(`user:${app.uid}`);
           if (!user) fail("user not found");
+
+          // Forced credential rotation. NWC secrets are bearer credentials, so a
+          // suspected disclosure cannot be repaired by changing an account
+          // password. The cutoff retires every connection created before the
+          // incident epoch while allowing users to create replacement connections
+          // without a global NWC outage. Keep the explicit quarantine membership
+          // as a durable forensic marker and as defense in depth if the cutoff is
+          // later removed accidentally.
+          const credentialCutoff = Number(await g("nwc:credential-cutoff")) || 0;
+          if (
+            credentialCutoff > 0 &&
+            (!Number(app.created) || Number(app.created) < credentialCutoff)
+          ) {
+            await db.sAdd("nwc:quarantined", pubkey);
+            // Retired clients commonly keep polling until their owners replace
+            // the connection. The rejection is expected and can be extremely
+            // noisy, so reply without logging every attempt. Explicit quarantine
+            // and newly detected attack-pattern events remain warning-level.
+            await reply({
+              result_type: method,
+              error: {
+                code: "UNAUTHORIZED",
+                message: "This NWC connection has been retired; create a new one",
+              },
+            });
+            return;
+          }
+
+          // Incident containment without disrupting every NWC user. Quarantine
+          // only connections whose bearer secret shows the probe/drain pattern;
+          // retain the app record so support can identify and rotate it later.
+          if (await db.sIsMember("nwc:quarantined", pubkey)) {
+            warn("Blocked quarantined NWC connection", user.username, pubkey, method);
+            await reply({
+              result_type: method,
+              error: {
+                code: "UNAUTHORIZED",
+                message: "This NWC connection has been disabled; create a new one",
+              },
+            });
+            return;
+          }
+
+          // Active-incident guard: the leaked credential set is being walked with
+          // keysend probes against years-old, previously idle connections. Block
+          // the first keysend after 30 days of inactivity and quarantine only that
+          // connection. Ordinary pay_invoice/pay traffic and active keysend apps
+          // remain unaffected. The Redis flag makes this guard easy to retire once
+          // the credential-rotation campaign is complete.
+          if (
+            method === "pay_keysend" &&
+            (await g("nwc:guard:dormant-keysend")) &&
+            (await isDormantNwcApp(app))
+          ) {
+            await db.sAdd("nwc:quarantined", pubkey);
+            warn("SECURITY: quarantined dormant NWC keysend", user.username, pubkey);
+            await reply({
+              result_type: method,
+              error: {
+                code: "UNAUTHORIZED",
+                message: "This dormant NWC connection has been disabled; create a new one",
+              },
+            });
+            return;
+          }
 
           // Serialize budget-affecting methods per app so the budget check and the
           // resulting spend can't interleave with a concurrent request on the same
@@ -318,52 +439,14 @@ export default () => {
           if (result === undefined || result === null) {
             result = { error: { code: "INTERNAL", message: "No response from handler" } };
           }
-          const payload = JSON.stringify({ result_type: method, ...result });
-          const convKey = nip44.v2.utils.getConversationKey(skBytes, pubkey);
-          content = isNip44
-            ? nip44.v2.encrypt(payload, convKey)
-            : await nip04.encrypt(sk, pubkey, payload);
-
-          const responseTags: string[][] = [
-            ["p", pubkey],
-            ["e", ev.id],
-          ];
-          if (isNip44) responseTags.push(["encryption", "nip44_v2"]);
-
-          let response: UnsignedEvent = {
-            created_at: Math.floor(Date.now() / 1000),
-            kind: 23195,
-            pubkey: serverPubkey,
-            tags: responseTags,
-            content,
-          };
-
-          response = await finalizeEvent(response, hexToBytes(sk));
-          r.send(["EVENT", response]);
+          await reply({ result_type: method, ...result });
         } catch (e) {
           err("problem with nwc", pubkey, method, JSON.stringify(params), e.message);
           try {
-            const payload = JSON.stringify({
+            await reply({
               result_type: method,
               error: { code: "INTERNAL", message: e.message },
             });
-            content = isNip44
-              ? nip44.v2.encrypt(payload, nip44.v2.utils.getConversationKey(skBytes, pubkey))
-              : await nip04.encrypt(sk, pubkey, payload);
-            const errTags: string[][] = [
-              ["p", pubkey],
-              ["e", ev.id],
-            ];
-            if (isNip44) errTags.push(["encryption", "nip44_v2"]);
-            let response: UnsignedEvent = {
-              created_at: Math.floor(Date.now() / 1000),
-              kind: 23195,
-              pubkey: serverPubkey,
-              tags: errTags,
-              content,
-            };
-            response = await finalizeEvent(response, hexToBytes(sk));
-            r.send(["EVENT", response]);
           } catch {}
         }
       } catch (e) {
@@ -510,11 +593,32 @@ const checkBudget = async (app, amount) => {
   const { max_amount, budget_renewal, pubkey, created } = app;
 
   if (!created) {
-    return error({
-      code: "UNAUTHORIZED",
-      message: `This NWC connection is no longer valid please create a new one at https://${config.domain}/settings/nostr`,
-    });
+    return {
+      budgetError: error({
+        code: "UNAUTHORIZED",
+        message: `This NWC connection is no longer valid please create a new one at https://${config.domain}/settings/nostr`,
+      }),
+      remaining: 0,
+    };
   }
+
+  const unlimited =
+    max_amount === undefined || max_amount === null || max_amount === "";
+  const limit = unlimited ? 0 : Number(max_amount);
+  if (!Number.isFinite(limit) || limit < 0) {
+    return {
+      budgetError: error({
+        code: "UNAUTHORIZED",
+        message: "This NWC connection has an invalid spending budget",
+      }),
+      remaining: 0,
+    };
+  }
+
+  // A blank budget is deliberately unlimited. A positive budget must have a
+  // known renewal period; otherwise an unknown value makes every historical
+  // payment fall out of the window and silently resets the budget each call.
+  if (limit === 0) return { budgetError: null, remaining: undefined };
 
   const periods = {
     daily: 60 * 60 * 24 * 1000,
@@ -524,9 +628,20 @@ const checkBudget = async (app, amount) => {
     never: 60 * 60 * 24 * 365 * 10 * 1000,
   };
 
+  const period = periods[budget_renewal];
+  if (!period) {
+    return {
+      budgetError: error({
+        code: "UNAUTHORIZED",
+        message: "This NWC connection has an invalid budget renewal period",
+      }),
+      remaining: 0,
+    };
+  }
+
   const pids = await db.lRange(`${pubkey}:payments`, 0, -1);
   let payments = await Promise.all(pids.map((pid) => gf(`payment:${pid}`)));
-  payments = payments.filter((p) => p?.created > Date.now() - periods[budget_renewal]);
+  payments = payments.filter((p) => p?.created > Date.now() - period);
 
   const spent = payments.reduce(
     (a, b) =>
@@ -538,14 +653,18 @@ const checkBudget = async (app, amount) => {
     0,
   );
 
-  if (max_amount > 0 && spent + amount > max_amount) {
-    return error({
-      code: "QUOTA_EXCEEDED",
-      message: `Budget exceeded: ${spent + amount} of ${max_amount}`,
-    });
+  const remaining = Math.max(0, limit - spent);
+  if (amount > remaining) {
+    return {
+      budgetError: error({
+        code: "QUOTA_EXCEEDED",
+        message: `Budget exceeded: ${spent + amount} of ${limit}`,
+      }),
+      remaining,
+    };
   }
 
-  return null;
+  return { budgetError: null, remaining };
 };
 
 const handle = (method, params, ev, app, user) =>
@@ -572,7 +691,7 @@ const handle = (method, params, ev, app, user) =>
       const amount = Math.round(amountMsat / 1000);
       const { max_fee, pubkey } = app;
 
-      const budgetError = await checkBudget(app, amount);
+      const { budgetError, remaining } = await checkBudget(app, amount);
       if (budgetError) return budgetError;
 
       if (payee === id) {
@@ -585,10 +704,11 @@ const handle = (method, params, ev, app, user) =>
             invoice,
             recipient,
             sender: user,
+            maxTotal: remaining,
           });
 
           const preimage = pid;
-          if (pubkey !== user.pubkey) await db.lPush(`${pubkey}:payments`, pid);
+          await db.lPush(`${pubkey}:payments`, pid);
 
           if (invoice.memo?.includes("9734")) {
             const { invoices } = await ln.listinvoices({ invstring: pr });
@@ -619,6 +739,7 @@ const handle = (method, params, ev, app, user) =>
           pr,
           memo: metadata && Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : undefined,
           retryFor: 25,
+          maxTotal: remaining,
         });
 
         await db.lPush(`${pubkey}:payments`, p.id);
@@ -725,7 +846,7 @@ const handle = (method, params, ev, app, user) =>
       }
       const amount = Math.round(amountMsat / 1000);
 
-      const budgetError = await checkBudget(app, amount);
+      const { budgetError, remaining } = await checkBudget(app, amount);
       if (budgetError) return budgetError;
 
       const created_at = Math.floor(Date.now() / 1000);
@@ -747,9 +868,10 @@ const handle = (method, params, ev, app, user) =>
             memo: payer_note,
             recipient,
             sender: user,
+            maxTotal: remaining,
           });
 
-          if (pubkey !== user.pubkey) await db.lPush(`${pubkey}:payments`, pid);
+          await db.lPush(`${pubkey}:payments`, pid);
 
           if (invoice.memo?.includes("9734")) {
             const { invoices } = await ln.listinvoices({ invstring: pr });
@@ -787,6 +909,7 @@ const handle = (method, params, ev, app, user) =>
           pr,
           memo: metadata ? JSON.stringify(metadata) : undefined,
           payerNote: payer_note,
+          maxTotal: remaining,
         });
 
         await db.lPush(`${pubkey}:payments`, p.id);
@@ -893,7 +1016,7 @@ const handle = (method, params, ev, app, user) =>
       // subject to the same budget — otherwise a budget-limited connection string
       // is a full-drain credential. It also left no `${app.pubkey}:payments`
       // entry, so subsequent budgeted calls under-counted the spend.
-      const budgetError = await checkBudget(app, amount);
+      const { budgetError, remaining } = await checkBudget(app, amount);
       if (budgetError) return budgetError;
 
       try {
@@ -904,6 +1027,7 @@ const handle = (method, params, ev, app, user) =>
           user,
           extratlvs,
           fee: app.max_fee,
+          maxTotal: remaining,
         });
 
         // Record the debit against the app budget. debit() stored the payment id

@@ -18,6 +18,7 @@ import { HDKey } from "@scure/bip32";
 import { generate } from "$lib/invoices";
 import ln from "$lib/ln";
 import lnd from "$lib/lnd";
+import { assertWithinSpendLimit } from "$lib/spend-budget";
 
 // External-withdrawal lockfiles. Out-of-band emergency stop: nobal.sh (or a
 // human) can `touch /home/adam/locks/<type>.locked` on the host, which is
@@ -211,6 +212,7 @@ export const debit = async ({
   rate = undefined,
   ourfee: ourfeeOverride = undefined,
   creditType: creditTypeOverride = undefined,
+  maxTotal = undefined,
 }) => {
   amount = Number.parseInt(amount);
 
@@ -338,6 +340,13 @@ export const debit = async ({
   if (creditTypeOverride) creditType = creditTypeOverride;
   if (ourfeeOverride !== undefined) ourfee = ourfeeOverride;
   if (aid !== uid) ourfee = 0;
+
+  // NWC and other delegated spenders can provide the exact allowance remaining
+  // for this call. Enforce it only after debit has reloaded the invoice and
+  // captured its tip, so a recipient cannot pass a small-invoice budget check,
+  // mutate the tip, and drain the account through the internal-payment path.
+  assertWithinSpendLimit({ amount, tip, fee, ourfee, maxTotal });
+
   const frozenBalance = !blacklisted || whitelisted ? 0 : await getBalance(uid);
 
   ourfee = await tbDebit(
@@ -1159,6 +1168,7 @@ export const sendKeysend = async ({
   memo = undefined,
   user,
   extratlvs = undefined,
+  maxTotal = undefined,
 }) => {
   fee = Math.max(Number.parseInt(fee || amount * 0.005), 5);
 
@@ -1172,6 +1182,7 @@ export const sendKeysend = async ({
     memo,
     user,
     type: PaymentType.lightning,
+    maxTotal,
   });
 
   let outcome = "unknown";
@@ -1273,6 +1284,7 @@ export const sendLightning = async ({
   memo = undefined,
   retryFor = undefined,
   payerNote = undefined,
+  maxTotal = undefined,
 }) => {
   let p;
 
@@ -1358,6 +1370,7 @@ export const sendLightning = async ({
     memo,
     user,
     type: PaymentType.lightning,
+    maxTotal,
   });
 
   await db.sAdd("pending", pr);
@@ -1480,6 +1493,7 @@ export const sendInternal = async ({
   memo = undefined,
   recipient,
   sender,
+  maxTotal = undefined,
 }) => {
   if (!invoice)
     invoice = await generate({
@@ -1488,7 +1502,7 @@ export const sendInternal = async ({
     });
 
   const { hash } = invoice;
-  const p = await debit({ hash, amount, memo, user: sender });
+  const p = await debit({ hash, amount, memo, user: sender, maxTotal });
   await credit({ hash, amount, memo, ref: sender.id, tip: p.tip });
 
   if (invoice.memo?.includes("9734")) {
