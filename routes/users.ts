@@ -1115,6 +1115,7 @@ export default {
           (a, b) =>
             a +
             (Math.abs(Number.parseInt(b.amount || 0)) +
+              Number.parseInt(b.tip || 0) +
               Number.parseInt(b.fee || 0) +
               Number.parseInt(b.ourfee || 0)),
           0,
@@ -1139,10 +1140,37 @@ export default {
 
       const { user } = req;
       const uid = user.id;
-      let app = await g(pubkey);
-
-      if (app && uid !== app.uid) fail("Unauthorized");
       if (secret) pubkey = getPublicKey(hexToBytes(secret));
+
+      // App records live under `app:<pubkey>`. Looking up the bare pubkey made
+      // this ownership check ineffective for normal NWC keys and allowed an
+      // authenticated user to overwrite another connection's configuration.
+      let app = await g(`app:${pubkey}`);
+      if (app && uid !== app.uid) fail("Unauthorized");
+
+      const validRenewals = new Set([
+        "daily",
+        "weekly",
+        "monthly",
+        "yearly",
+        "never",
+      ]);
+      if (budget_renewal && !validRenewals.has(budget_renewal))
+        fail("Invalid budget renewal period");
+
+      for (const [label, value] of [
+        ["spending budget", max_amount],
+        ["maximum fee", max_fee],
+      ]) {
+        if (
+          value !== undefined &&
+          value !== null &&
+          value !== "" &&
+          (!Number.isFinite(Number(value)) || Number(value) < 0)
+        )
+          fail(`Invalid ${label}`);
+      }
+
       // Notifications are opt-in (default off): most users don't consume them and
       // publishing payment_sent/payment_received for every app would flood the
       // relay. A client enables them by sending notify:"true" when creating the
