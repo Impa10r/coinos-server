@@ -24,7 +24,7 @@ const resLogger = pino(pino.destination("res"));
 
 // Never log plaintext passwords. Redact password fields from request bodies
 // before they reach the request log.
-const REDACT_FIELDS = ["password", "confirm"];
+const REDACT_FIELDS = ["password", "confirm", "secret", "otpsecret"];
 const redactBody = (body: any) => {
   if (!body || typeof body !== "object") return body;
   const copy: any = { ...body };
