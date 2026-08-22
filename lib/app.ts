@@ -15,8 +15,8 @@ import { jwtStrategy } from "$lib/auth";
 
 const app = fastify({
   logger: true,
-  disableRequestLogging: true,
-  maxParamLength: 500,
+  logController: new fastify.LogController({ disableRequestLogging: true }),
+  routerOptions: { maxParamLength: 500 },
 });
 
 const reqLogger = pino(pino.destination("req"));
