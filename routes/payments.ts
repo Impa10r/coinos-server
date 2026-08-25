@@ -33,10 +33,19 @@ import {
 import { PaymentType } from "$lib/types";
 import { SATS, bail, fail, fields, getInvoice, getPayment, getUser, pick, sats } from "$lib/utils";
 import rpc from "@coinos/rpc";
+import { timingSafeEqual } from "crypto";
 import got from "got";
 import { v4 } from "uuid";
 
 const lq = rpc(config.liquid);
+
+// Constant-time compare — avoids leaking a byte-by-byte match position via
+// response timing on secret/signature checks.
+const safeEqual = (a: string, b: string) => {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  return bufA.length === bufB.length && timingSafeEqual(bufA as any, bufB as any);
+};
 
 export default {
   async info(c) {
@@ -566,7 +575,13 @@ export default {
     if (ourWallet && wallet && wallet !== ourWallet) return c.json({});
 
     try {
-      if (!config.adminpass || secret !== config.adminpass) fail("unauthorized");
+      // Was checked against config.adminpass — the same credential that
+      // grants admin login/impersonation and controls /freeze. walletnotify
+      // puts this secret on a shell command line in bitcoin.conf (visible
+      // via `ps` while it runs) and sends it over plain HTTP; it must never
+      // double as the admin password.
+      if (!config.txWebhookSecret || !safeEqual(secret || "", config.txWebhookSecret))
+        fail("unauthorized");
 
       const node = rpc({ ...config[type], wallet });
       let tx;
@@ -707,7 +722,8 @@ export default {
     const hookSecret = secret || headerSecret;
 
     try {
-      if (config.txWebhookSecret && hookSecret !== config.txWebhookSecret) fail("unauthorized");
+      if (config.txWebhookSecret && !safeEqual(hookSecret || "", config.txWebhookSecret))
+        fail("unauthorized");
       if (!txid) fail("missing txid");
 
       const tx = await getTx(txid);
