@@ -346,6 +346,12 @@ export default {
   },
 
   async authorize(c) {
+    // Kill-switch for the fund/authorize/take mechanism (SECURITY 2026-08-25:
+    // the /take fund-claim path could pay out unbacked balance). Set redis
+    // `fund:disabled` to fail all fund authorizations closed while the
+    // mechanism is audited/rewritten.
+    if (await g("fund:disabled")) fail("Fund transfers temporarily disabled");
+
     const user = c.get("user");
     const { id: uid } = user;
     const body = await c.req.json();
@@ -354,14 +360,24 @@ export default {
     const managers = [...(await db.sMembers(`fund:${id}:managers`))];
     if (managers.length && !managers.includes(uid)) fail("Unauthorized");
 
+    // The authorization's fiat/currency is the ONLY ceiling on how much a later
+    // /take can pull from the authorizer (cap = sats(fiat / rates[currency])).
+    // Reject a NaN/zero/non-finite rate or a non-positive fiat so the ceiling
+    // can never be turned into an astronomically large or non-finite value.
+    const rates = await g("rates");
+    const rate = Number(rates?.[currency]);
+    const fiatAmount = Number(fiat);
+    if (!Number.isFinite(rate) || rate <= 0) fail("Invalid currency");
+    if (!Number.isFinite(fiatAmount) || fiatAmount <= 0) fail("Invalid amount");
+
     const authId = v4();
     const authorization = {
       authId,
       fundId: id,
       uid,
       currency,
-      fiat,
-      amount,
+      fiat: fiatAmount,
+      amount: Number.parseInt(amount) || 0,
       created: Date.now(),
     };
 
@@ -400,8 +416,11 @@ export default {
     const user = c.get("user");
     let { id, amount, invoice: iid, authId } = body;
     try {
+      // Kill-switch — see authorize().
+      if (await g("fund:disabled")) fail("Fund transfers temporarily disabled");
+
       amount = Number.parseInt(amount);
-      if (amount <= 0) fail("Invalid amount");
+      if (!Number.isFinite(amount) || amount <= 0) fail("Invalid amount");
 
       const rates = await g("rates");
 
@@ -431,7 +450,20 @@ export default {
 
       if (authorization && !authorization.claimed) {
         const { currency, fiat } = authorization;
-        amount = Math.min(amount, sats(fiat / rates[currency]));
+        // Bound the take to the authorized fiat value using a VALIDATED fiat
+        // rate. A non-finite/zero rate or a crypto-denominated authorization
+        // (rate ~1) would otherwise make sats(fiat / rate) an astronomically
+        // large ceiling, defeating the cap (the drain vector).
+        const rate = Number(rates?.[currency]);
+        const fiatAmount = Number(fiat);
+        if (!Number.isFinite(rate) || rate <= 0)
+          fail("Invalid authorization currency");
+        if (!Number.isFinite(fiatAmount) || fiatAmount <= 0)
+          fail("Invalid authorization amount");
+        const cap = sats(fiatAmount / rate);
+        if (!Number.isFinite(cap) || cap <= 0) fail("Invalid authorization");
+        amount = Math.min(amount, cap);
+        if (!Number.isFinite(amount) || amount <= 0) fail("Invalid amount");
 
         // Atomic single-use claim. The read above is not a lock: concurrent
         // POST /take for the same authorization all pass the `!claimed` gate and,
@@ -449,6 +481,7 @@ export default {
           // every later /take skips the funding block.
           try {
             const sender = await getUser(authorization.uid);
+            if (!sender) fail("authorizer not found");
 
             const { hash } = await generate({
               invoice: { amount, type: "lightning" },
