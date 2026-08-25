@@ -1061,6 +1061,11 @@ export default {
     try {
       const body = await c.req.json();
       const { fingerprint, pubkey, name, seed, type, accountIndex } = body;
+      // Non-custodial send (lib/payments.ts sendNonCustodial) derives
+      // Bitcoin-format addresses and only queries the Bitcoin esplora —
+      // it has no Liquid-specific path, so a "liquid" vault would silently
+      // misidentify its own change outputs and miscompute balances.
+      if (type === "liquid") fail("Liquid vaults are not supported");
       const user = c.get("user");
       const { id: uid } = user;
 

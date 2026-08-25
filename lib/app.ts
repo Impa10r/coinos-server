@@ -1,6 +1,9 @@
+import config from "$config";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
+import { getCookie } from "hono/cookie";
+import jwt from "jsonwebtoken";
 import { pino } from "pino";
 
 const app = new Hono();
@@ -78,7 +81,19 @@ if (prod) {
     // Strict rate limit for /login and /send: 10 req / 10s
     const isStrict = url.includes("/login") || url.includes("/send");
     if (isStrict) {
-      const strictKey = `strict:${ua}`;
+      // Keying on UA alone lets anyone bypass this by rotating the header.
+      // Tie it to the authenticated account when there's a valid session
+      // (cheap signature check, no DB lookup), otherwise fall back to
+      // ip+ua so a shared/absent UA doesn't bucket unrelated clients.
+      let uid = "";
+      const bearer = c.req.header("authorization");
+      const token = (bearer?.startsWith("Bearer ") ? bearer.slice(7) : null) || getCookie(c, "token");
+      if (token) {
+        try {
+          uid = (jwt.verify(token, config.jwt) as any).id;
+        } catch {}
+      }
+      const strictKey = `strict:${uid || `${ip}:${ua}`}`;
       const s = strictLimits.get(strictKey);
       if (s && now < s.reset) {
         s.count++;
