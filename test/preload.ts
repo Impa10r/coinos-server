@@ -84,6 +84,19 @@ if (process.env.INTEGRATION) {
         return v;
       }
     };
+    const sa = (k: string, v: any) => {
+      globalThis.__testStore.archiveStore ??= {};
+      globalThis.__testStore.archiveStore[k] = JSON.stringify(v);
+    };
+    const ga = async (k: string) => {
+      const v = globalThis.__testStore.archiveStore?.[k] ?? null;
+      if (v === null) return null;
+      try {
+        return JSON.parse(v);
+      } catch {
+        return v;
+      }
+    };
     return {
       db: {
         get: async (k: string) => kv()[k] ?? null,
@@ -161,7 +174,9 @@ if (process.env.INTEGRATION) {
       g,
       s,
       gf,
-      ga: async () => null,
+      gfAll: async (keys: string[]) => Promise.all(keys.map(gf)),
+      sa,
+      ga,
       archive: { lRange: async () => [] },
     };
   });
@@ -198,6 +213,7 @@ if (process.env.INTEGRATION) {
 
   mock.module("$lib/tb", () => ({
     getBalance: mock(async () => 10_000_000),
+    getPending: mock(async () => 0),
     getCredit: mock(async () => 0),
     tbDebit: mock(async () => 0),
     tbCredit: mock(async () => undefined),
@@ -206,7 +222,14 @@ if (process.env.INTEGRATION) {
     tbConfirm: mock(async () => undefined),
     tbSetBalance: mock(async () => undefined),
     tbSetPending: mock(async () => undefined),
-    fundDebit: mock(async () => ({ err: null })),
+    tbSetCredit: mock(async () => undefined),
+    tbFundCredit: mock(async () => undefined),
+    tbFundDebit: mock(async () => ({ err: null })),
+    getFundBalance: mock(async () => 0),
+    createBalanceAccount: mock(async () => {}),
+    createCreditAccounts: mock(async () => {}),
+    createFundAccount: mock(async () => {}),
+    tbMultiplyForMicrosats: mock(async () => 1),
     initTigerBeetle: mock(async () => {}),
   }));
 
@@ -224,12 +247,41 @@ if (process.env.INTEGRATION) {
       getroutes: mock(async () => ({ routes: [] })),
       sendinvoice: mock(async () => ({})),
     },
+    lnb: {
+      decode: mock(async () => ({ type: "bolt11", amount_msat: 1_000_000, payee: "test-payee" })),
+      listpeerchannels: mock(async () => ({ channels: [] })),
+      listpays: mock(async () => ({ pays: [] })),
+      xpay: mock(async () => ({ amount_sent_msat: 1_000_000, payment_preimage: "preimage-abc" })),
+      getinfo: mock(async () => ({ id: "our-node-id-b" })),
+      listinvoices: mock(async () => ({ invoices: [] })),
+      listfunds: mock(async () => ({ channels: [] })),
+      keysend: mock(async () => ({})),
+    },
+    lnListen: {
+      waitanyinvoice: mock(async () => {
+        throw { code: 904, message: "timed out" };
+      }),
+    },
   }));
 
-  mock.module("$lib/logging", () => ({ l: () => {}, warn: mock(() => {}), err: () => {} }));
+  mock.module("$lib/logging", () => ({
+    l: () => {},
+    warn: mock(() => {}),
+    err: () => {},
+    shortError: (msg: any, max = 400): string => {
+      let s = typeof msg === "string" ? msg : (msg?.message ?? String(msg));
+      return s.length > max ? `${s.slice(0, max)}…` : s;
+    },
+    line: () => "test:0",
+  }));
   mock.module("$lib/notifications", () => ({ notify: () => {}, nwcNotify: () => {} }));
   mock.module("$lib/webhooks", () => ({ callWebhook: mock(() => {}) }));
-  mock.module("$lib/sockets", () => ({ emit: mock(() => {}), sendHeartbeat: () => {} }));
+  mock.module("$lib/sockets", () => ({
+    emit: mock(() => {}),
+    sendHeartbeat: () => {},
+    broadcast: mock(() => {}),
+    websocket: { message: mock(async () => {}), close: mock(() => {}), open: mock(() => {}) },
+  }));
   mock.module("$lib/esplora", () => ({
     btcNetwork: { bech32: "bcrt", pubKeyHash: 0x6f, scriptHash: 0xc4, wif: 0xef },
     hdVersions: { private: 0x04358394, public: 0x043587cf },
@@ -260,6 +312,17 @@ if (process.env.INTEGRATION) {
     serverPubkey2: "m",
     serverSecret: "m",
     serverSecret2: "m",
+    EX: 60 * 60 * 24,
+    anon: (pubkey: string) => ({ pubkey, name: "Anonymous" }),
+    get: mock(async () => null),
+    getCount: mock(async () => 0),
+    getNostrUser: mock(async () => null),
+    getProfile: mock(async () => null),
+    getRelays: mock(async () => []),
+    q: mock(async () => []),
+    encryptionSchemes: mock(async () => ["nip44_v2"]),
+    decryptPayload: mock(async (payload: string) => payload),
+    encryptPayload: mock(async (payload: string) => payload),
   }));
   mock.module("$lib/mqtt", () => ({ default: { publish: () => {} } }));
   mock.module("$lib/ark", () => ({
@@ -268,11 +331,20 @@ if (process.env.INTEGRATION) {
     getArkBalance: async () => 0,
     verifyArkVtxo: async () => true,
   }));
-  mock.module("$lib/ecash", () => ({ request: async () => ({}) }));
+  mock.module("$lib/ecash", () => ({
+    request: async () => ({}),
+    get: mock(async () => ({})),
+    claim: mock(async () => ({})),
+    mint: mock(async () => ({})),
+    check: mock(async () => ({})),
+    init: mock(async () => ({})),
+  }));
   mock.module("$lib/lightning", () => ({
     replay: async () => ({}),
     fixBolt12: () => {},
     listenForLightning: () => {},
+    ensureListenerAlive: mock(async () => {}),
+    getLightningListenerStatus: mock(() => ({ phase: "idle", phaseStartedAt: Date.now() })),
   }));
   mock.module("$lib/mail", () => ({ mail: async () => {}, templates: {} }));
   mock.module("$lib/auth", () => ({
@@ -290,6 +362,14 @@ if (process.env.INTEGRATION) {
       pending: 0,
       ...invoice,
     })),
+    getUserOffer: mock(async () => ({ id: "gen-offer", hash: "gen-offer-hash" })),
+    parseEntry: (e: string) => {
+      try {
+        const parsed = JSON.parse(e);
+        if (parsed?.preimage) return { price: null, fiat: null, currency: null, ...parsed };
+      } catch {}
+      return { preimage: e, price: null, fiat: null, currency: null };
+    },
   }));
   mock.module("$lib/api", () => ({
     default: { bitcoin: "http://localhost", liquid: "http://localhost" },
