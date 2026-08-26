@@ -630,18 +630,18 @@ export const decode = async (hex) => {
   return { tx, type };
 };
 
-const inflight = {};
-
 const sendNonCustodial = async (params) => {
   let { aid, hex, rate, user } = params;
   if (!hex) ({ hex } = await build(params));
 
   const { tx } = await decode(hex);
   let { txid } = tx;
+  let sendLockKey: string | undefined;
 
   try {
-    if (inflight[txid]) fail("payment in flight");
-    inflight[txid] = true;
+    sendLockKey = `sendlock:bitcoin:${txid}`;
+    if (!(await db.set(sendLockKey, "1", { NX: true, EX: 60 }))) fail("payment in flight");
+    if (await g(`payment:${txid}`)) fail("transaction already processed");
 
     const account = await g(`account:${aid}`);
     const nextIndex = account.nextIndex || 0;
@@ -694,10 +694,10 @@ const sendNonCustodial = async (params) => {
     await broadcastTx(hex);
     await db.sAdd(`inflight:${aid}`, p.id);
 
-    delete inflight[txid];
+    if (sendLockKey) await db.del(sendLockKey);
     return p;
   } catch (e) {
-    delete inflight[txid];
+    if (sendLockKey) await db.del(sendLockKey);
     throw e;
   }
 };
@@ -721,11 +721,9 @@ export const sendOnchain = async (params) => {
   const node = rpc(config[type]);
   const isBitcoin = type === PaymentType.bitcoin;
   let { txid } = tx;
+  let sendLockKey: string | undefined;
 
   try {
-    if (inflight[txid]) fail("payment in flight");
-    inflight[txid] = true;
-
     if (!signed) {
       if (config[type].walletpass)
         await node.walletPassphrase(config[type].walletpass, config[type].walletpassSeconds);
@@ -736,6 +734,18 @@ export const sendOnchain = async (params) => {
     }
 
     ({ txid } = await node.decodeRawTransaction(hex));
+
+    // Persistent, atomic guard against the same txid being debited twice —
+    // a client retry after a slow/timed-out response, or two overlapping
+    // requests, can otherwise both pass every check below and both call
+    // debit(), which has no dedup of its own against `hash`. The old
+    // in-memory inflight[] lock only caught truly-concurrent calls in this
+    // one process; this mirrors the confirmlock pattern already used for
+    // the credit side (dfd31ad8) with a persistent existence check on top
+    // for the case where a retry lands after the lock has expired.
+    sendLockKey = `sendlock:${type}:${txid}`;
+    if (!(await db.set(sendLockKey, "1", { NX: true, EX: 60 }))) fail("payment in flight");
+    if (await g(`payment:${txid}`)) fail("transaction already processed");
 
     const r = await node.testMempoolAccept([hex]);
     if (!r[0].allowed) fail(`transaction rejected: ${r[0]["reject-reason"]}`);
@@ -843,10 +853,10 @@ export const sendOnchain = async (params) => {
       await db.sAdd("outgoing:unconfirmed", p.id);
     }
 
-    delete inflight[txid];
+    if (sendLockKey) await db.del(sendLockKey);
     return p;
   } catch (e) {
-    delete inflight[txid];
+    if (sendLockKey) await db.del(sendLockKey);
     throw e;
   }
 };
@@ -862,39 +872,50 @@ export const sendUsdt = async ({ address, amount, user }) => {
 
   const LIQUID_NETWORK_FEE = 50;
 
-  const p = (await debit({
-    aid: uid,
-    hash: address,
-    amount: btcSats + LIQUID_NETWORK_FEE,
-    fee: LIQUID_NETWORK_FEE,
-    ourfee: 0,
-    rate,
-    user,
-    type: PaymentType.liquid,
-  })) as Payment;
+  // No txid exists until after the send below, so there's nothing to lock
+  // on the way sendOnchain/sendNonCustodial do — lock on the request shape
+  // instead, closing the same client-retry double-debit gap for the window
+  // a retry would otherwise re-debit and re-send.
+  const sendLockKey = `sendlock:usdt:${uid}:${address}:${amount}`;
+  if (!(await db.set(sendLockKey, "1", { NX: true, EX: 60 }))) fail("payment in flight");
 
-  if (config.liquid.walletpass) await lq.walletPassphrase(config.liquid.walletpass, 300);
+  try {
+    const p = (await debit({
+      aid: uid,
+      hash: address,
+      amount: btcSats + LIQUID_NETWORK_FEE,
+      fee: LIQUID_NETWORK_FEE,
+      ourfee: 0,
+      rate,
+      user,
+      type: PaymentType.liquid,
+    })) as Payment;
 
-  const txid = await lq.sendToAddress(
-    address,
-    amount,
-    "",
-    "",
-    false,
-    false,
-    1,
-    "UNSET",
-    false,
-    (config.liquid as any).usdt,
-  );
+    if (config.liquid.walletpass) await lq.walletPassphrase(config.liquid.walletpass, 300);
 
-  p.hash = txid;
-  p.assetAmount = amount;
-  p.assetType = "USDT";
-  await s(`payment:${p.id}`, p);
+    const txid = await lq.sendToAddress(
+      address,
+      amount,
+      "",
+      "",
+      false,
+      false,
+      1,
+      "UNSET",
+      false,
+      (config.liquid as any).usdt,
+    );
 
-  l(user.username, "sent USDT", amount, "→", txid);
-  return p;
+    p.hash = txid;
+    p.assetAmount = amount;
+    p.assetType = "USDT";
+    await s(`payment:${p.id}`, p);
+
+    l(user.username, "sent USDT", amount, "→", txid);
+    return p;
+  } finally {
+    await db.del(sendLockKey);
+  }
 };
 
 // Throttled warn — emit at most once per WARN_THROTTLE_MS per (key, message) pair
