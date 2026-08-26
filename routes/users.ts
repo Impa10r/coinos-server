@@ -87,11 +87,26 @@ const verifyRecaptcha = async (response, c?, body?) => {
           response,
           remoteip: ip,
         },
+        // Bound the wait so a slow/unreachable Google can't hang the login.
+        timeout: { request: 6000 },
       })
       .json()) as any;
+    // A real verdict from Google: fail CLOSED only when the captcha itself is
+    // invalid (success === false).
     return success || (!!config.adminpass && response === config.adminpass);
-  } catch {
-    return false;
+  } catch (e) {
+    // Fail OPEN on an INFRASTRUCTURE error (network blip, timeout, Google 5xx).
+    // Reaching Google is not part of authentication; failing closed here turned
+    // a transient coinos<->Google connectivity hiccup into a login outage —
+    // users got "failed captcha" until it cleared (2026-08-25 incident). The
+    // password and the per-IP login rate limits (ipCount>30 / ipFailures>20 ->
+    // 429) still gate the request; captcha is only bot-mitigation, so allowing
+    // it through when the verifier is unreachable is the safer failure mode.
+    warn(
+      "recaptcha verify unreachable — allowing login (fail-open)",
+      (e as any)?.code ?? (e as any)?.message ?? String(e),
+    );
+    return true;
   }
 };
 
