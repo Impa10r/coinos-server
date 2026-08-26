@@ -66,6 +66,18 @@ export async function listenForLightning() {
       payIndex,
       LISTENER_WAIT_TIMEOUT_SECONDS,
     );
+
+    // Defense-in-depth only: waitanyinvoice should always either resolve with
+    // an invoice or reject (CLN's 904 timeout, a socket error). A falsy result
+    // here would mean the RPC client itself is broken (as the constructor
+    // return-value bug in the @asoltys/clightning-client patch was) rather
+    // than a normal timing race, so — unlike the real 904 timeout case below —
+    // this must NOT re-arm immediately: with nothing actually blocking on the
+    // socket, an unconditional immediate retry would spin as fast as the event
+    // loop allows. Fall through to the same backoff + MAX_LISTENER_RETRIES
+    // path as a genuine error instead.
+    if (!inv) throw new Error("waitanyinvoice resolved with no result");
+
     const {
       label,
       local_offer_id,

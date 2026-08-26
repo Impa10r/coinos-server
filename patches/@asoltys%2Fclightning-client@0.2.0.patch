@@ -1,16 +1,27 @@
+diff --git a/node_modules/@asoltys/clightning-client/.bun-tag-97e780f04a35bb10 b/.bun-tag-97e780f04a35bb10
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/node_modules/@asoltys/clightning-client/.bun-tag-a0580d1ef1abb386 b/.bun-tag-a0580d1ef1abb386
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/index.js b/index.js
-index a03fe100f92bb0852c54986bf032e18a4292191f..fa3ba067296d19980061a2bb1e40876381a56cf2 100644
+index a03fe100f92bb0852c54986bf032e18a4292191f..3a4fccc6691fcaa88376782d8942176c569d1fab 100644
 --- a/index.js
 +++ b/index.js
-@@ -41,7 +41,31 @@ class LightningClient extends EventEmitter {
+@@ -41,7 +41,39 @@ class LightningClient extends EventEmitter {
  		this.reconnectTimeout = null;
  		this.reqcount = 0;
  
 -		this.client = net.createConnection(rpcPath);
-+		this._setup();
++		// _setup() returns the dynamic-dispatch Proxy (get(prop) -> RPC method).
++		// That return value must propagate out of the constructor: a class
++		// constructor that returns an object overrides `this` as the result of
++		// `new`, which is how every RPC method (getinfo, decode, waitanyinvoice,
++		// ...) becomes callable. Losing this `return` makes `new LightningClient()`
++		// yield the bare instance instead, so any RPC method name resolves to
++		// undefined and every call (including waitanyinvoice) "succeeds" with an
++		// undefined result instead of ever reaching the socket.
++		return this._setup();
 +	}
 +
 +	_setup() {
@@ -38,7 +49,7 @@ index a03fe100f92bb0852c54986bf032e18a4292191f..fa3ba067296d19980061a2bb1e408763
  		this.rl = readline.createInterface({ input: this.client });
  
  		this.clientConnectionPromise = new Promise((resolve) => {
-@@ -102,8 +126,15 @@ class LightningClient extends EventEmitter {
+@@ -102,8 +134,15 @@ class LightningClient extends EventEmitter {
  		}
  
  		this.reconnectTimeout = setTimeout(() => {
