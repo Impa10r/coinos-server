@@ -268,12 +268,6 @@ app.get("/replay/:index", (c) => {
   return c.json({});
 });
 
-app.post("/echo", async (c) => {
-  const body = await c.req.json();
-  console.log("echo", body);
-  return c.json(body);
-});
-
 const host_: string = process.env["HOST"] || "0.0.0.0";
 const port: number = Number.parseInt(process.env["PORT"]) || 3119;
 

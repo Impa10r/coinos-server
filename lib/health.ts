@@ -88,7 +88,7 @@ async function checkLightningHealth(): Promise<boolean> {
     try {
       const waiting = (await withTimeout(
         ln.waitanyinvoice(payIndex, 1),
-        5_000,
+        15_000,
         "listener backlog probe",
       )) as any;
       if (Number(waiting?.pay_index) > payIndex) {
