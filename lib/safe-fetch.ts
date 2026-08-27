@@ -1,13 +1,27 @@
-// SSRF-resistant wrapper around got for fetching user-supplied URLs (lnurl /
-// lightning-address resolution in routes/lnurl.ts). Resolves the target host
-// and rejects it if any resolved IP is loopback, private, link-local, CGNAT,
-// or cloud-metadata. Re-validates on every redirect hop so a 30x can't bounce
-// us into the internal network. (A determined DNS-rebinding attacker still has
-// a small TOCTOU window between resolve and connect; acceptable here — the
-// dominant risk was unrestricted internal access, which this closes.)
+// SSRF-resistant fetch for user-supplied URLs (lnurl / lightning-address
+// resolution in routes/lnurl.ts). Rejects any host that resolves to a
+// loopback, private, link-local, CGNAT, or cloud-metadata address.
+//
+// Unlike a resolve-then-fetch guard (which re-resolves DNS when it actually
+// connects, leaving a DNS-rebinding TOCTOU window), this pins the socket to the
+// exact IP it validated: the connection's DNS lookup IS the validation, in one
+// callback, so a low-TTL rebind cannot swap in an internal IP after the check.
+// Redirects are followed manually and each hop is re-validated the same way.
+// Scheme is restricted to http(s); 8s timeout; 2MB streamed-body cap.
+//
+// .onion hosts skip the pinned-lookup path entirely: Tor's socks5h routing
+// resolves them on the proxy side, never through Node's own DNS, so there is
+// no local hostname to validate — and a caller-supplied SOCKS5 proxy agent
+// (see extraOpts below) takes over connection establishment itself, bypassing
+// the `lookup` option regardless of what it's set to.
+import http from "node:http";
+import https from "node:https";
 import dns from "node:dns";
 import net from "node:net";
-import got from "got";
+
+const MAX_BYTES = 2_000_000;
+const MAX_REDIRECTS = 4;
+const TIMEOUT_MS = 8000;
 
 const blockedV4 = (ip: string): boolean => {
   const p = ip.split(".").map(Number);
@@ -39,63 +53,131 @@ const isBlockedIp = (ip: string): boolean => {
   return true; // not a recognizable IP -> block
 };
 
-const assertHostAllowed = async (hostname: string) => {
-  const host = hostname.replace(/^\[|\]$/g, ""); // strip IPv6 literal brackets
-  let ips: string[];
-  if (net.isIP(host)) ips = [host];
-  else {
-    const recs = await dns.promises.lookup(host, { all: true });
-    ips = recs.map((r) => r.address);
+// A drop-in for the Node dns.lookup used by http(s).request: resolves the host,
+// rejects the whole connection if ANY resolved address is blocked (so an
+// attacker can't return [public, private] and hope the stack picks the private
+// one), and otherwise hands the socket the first allowed address. Because the
+// address returned here is the one the socket connects to, there is no
+// resolve/connect gap for a rebind to slip through.
+const pinnedLookup = (
+  hostname: string,
+  options: any,
+  cb: (err: Error | null, address?: any, family?: number) => void,
+): void => {
+  // hostname may be an IP literal (redirect to a raw IP) — validate directly.
+  if (net.isIP(hostname)) {
+    if (isBlockedIp(hostname)) return cb(new Error(`blocked host ${hostname}`));
+    const fam = net.isIPv6(hostname) ? 6 : 4;
+    return cb(null, options?.all ? [{ address: hostname, family: fam }] : hostname, fam);
   }
-  if (!ips.length) throw new Error(`cannot resolve ${host}`);
-  for (const ip of ips)
-    if (isBlockedIp(ip)) throw new Error(`blocked host ${host} -> ${ip}`);
+  dns.lookup(hostname, { all: true }, (err, addrs: any[]) => {
+    if (err) return cb(err);
+    if (!addrs?.length) return cb(new Error(`cannot resolve ${hostname}`));
+    const bad = addrs.find((a) => isBlockedIp(a.address));
+    if (bad) return cb(new Error(`blocked host ${hostname} -> ${bad.address}`));
+    const a = addrs[0];
+    if (options?.all) cb(null, [{ address: a.address, family: a.family }]);
+    else cb(null, a.address, a.family);
+  });
 };
+
+const fetchOnce = (
+  url: string,
+  redirectsLeft: number,
+  extraOpts: Record<string, any> = {},
+): Promise<any> =>
+  new Promise((resolve, reject) => {
+    let u: URL;
+    try {
+      u = new URL(url);
+    } catch {
+      return reject(new Error("invalid url"));
+    }
+    if (u.protocol !== "http:" && u.protocol !== "https:")
+      return reject(new Error("unsupported scheme"));
+
+    const isOnion = u.hostname.toLowerCase().endsWith(".onion");
+
+    // CRITICAL: Node skips the custom `lookup` when the URL host is already an
+    // IP literal, so pinnedLookup alone would not see a raw-IP SSRF target.
+    // Validate any literal host up front (strip IPv6 brackets first). Skipped
+    // for .onion — not a real SSRF concern there (see file header), and
+    // .onion hostnames are never IP literals anyway.
+    if (!isOnion) {
+      const literal = u.hostname.replace(/^\[|\]$/g, "");
+      if (net.isIP(literal) && isBlockedIp(literal))
+        return reject(new Error(`blocked host ${literal}`));
+    }
+
+    const mod = u.protocol === "https:" ? https : http;
+
+    // extraOpts carries a caller-supplied proxy agent (SOCKS5/Tor) through to
+    // the underlying request — used for .onion targets, without every caller
+    // needing to know the SSRF-guard internals. Accept either a single Agent
+    // or the got-style { http, https } pair (routes/lnurl.ts's existing call
+    // shape) and resolve it to the one matching this request's protocol.
+    const { agent: rawAgent, ...restOpts } = extraOpts;
+    const agent =
+      rawAgent && typeof rawAgent === "object" && ("http" in rawAgent || "https" in rawAgent)
+        ? mod === https
+          ? rawAgent.https
+          : rawAgent.http
+        : rawAgent;
+
+    const req = mod.request(
+      url,
+      {
+        method: "GET",
+        headers: { accept: "application/json" },
+        ...(isOnion ? {} : { lookup: pinnedLookup as any }),
+        ...(agent ? { agent } : {}),
+        ...restOpts,
+      },
+      (res) => {
+        const status = res.statusCode || 0;
+
+        // manual redirect handling — re-validate each hop via pinnedLookup
+        if (status >= 300 && status < 400 && res.headers.location) {
+          res.resume(); // drain
+          if (redirectsLeft <= 0) return reject(new Error("too many redirects"));
+          let next: string;
+          try {
+            next = new URL(res.headers.location, url).toString();
+          } catch {
+            return reject(new Error("bad redirect target"));
+          }
+          return resolve(fetchOnce(next, redirectsLeft - 1, extraOpts));
+        }
+
+        let len = 0;
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => {
+          len += c.length;
+          if (len > MAX_BYTES) {
+            req.destroy();
+            reject(new Error("response too large"));
+            return;
+          }
+          chunks.push(c);
+        });
+        res.on("end", () => {
+          try {
+            resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+          } catch {
+            reject(new Error("invalid json response"));
+          }
+        });
+      },
+    );
+    req.setTimeout(TIMEOUT_MS, () => req.destroy(new Error("request timed out")));
+    req.on("error", reject);
+    req.end();
+  });
 
 // Fetch a user-supplied URL with SSRF protection and return the parsed JSON
 // body. Throws on a bad scheme/URL or a host that resolves into a blocked
-// range. `extraOpts` is merged into the got() call — used to pass the
-// SOCKS5/Tor proxy agent through for .onion targets (see below), without
-// every caller needing to know the SSRF-guard internals.
-export const safeGot = async (url: string, extraOpts: Record<string, any> = {}): Promise<any> => {
-  let u: URL;
-  try {
-    u = new URL(url);
-  } catch {
-    throw new Error("invalid url");
-  }
-  if (u.protocol !== "http:" && u.protocol !== "https:")
-    throw new Error("unsupported scheme");
-
-  // .onion hosts aren't resolvable via local DNS at all — that's the point of
-  // Tor's socks5h routing, resolution happens on the proxy side. The
-  // loopback/private/CGNAT SSRF concern this guard exists for doesn't apply
-  // the same way here: the request never touches our local network stack
-  // directly, it goes through the SOCKS proxy into the Tor network.
-  const isOnion = u.hostname.toLowerCase().endsWith(".onion");
-  if (!isOnion) await assertHostAllowed(u.hostname);
-
-  return got(url, {
-    timeout: { request: 8000 },
-    retry: { limit: 0 },
-    maxRedirects: 4,
-    ...extraOpts,
-    hooks: {
-      beforeRedirect: [
-        async (options: any) => {
-          if (!options.url.hostname.toLowerCase().endsWith(".onion")) {
-            await assertHostAllowed(options.url.hostname);
-          }
-        },
-      ],
-      afterResponse: [
-        (response: any) => {
-          const len = Number(response.headers["content-length"] || 0);
-          if (len > 2_000_000) throw new Error("response too large");
-          return response;
-        },
-      ],
-      ...extraOpts.hooks,
-    },
-  }).json();
-};
+// range. `extraOpts` is merged into the request — used to pass a SOCKS5/Tor
+// proxy agent through for .onion targets (see fetchOnce above), without every
+// caller needing to know the SSRF-guard internals.
+export const safeGot = async (url: string, extraOpts: Record<string, any> = {}): Promise<any> =>
+  fetchOnce(url, MAX_REDIRECTS, extraOpts);
