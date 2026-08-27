@@ -92,10 +92,21 @@ async function checkLightningHealth(): Promise<boolean> {
         "listener backlog probe",
       )) as any;
       if (Number(waiting?.pay_index) > payIndex) {
-        listenerBacklogPayIndex = Number(waiting.pay_index);
-        throw new Error(
-          `lightning listener backlog: stored=${payIndex} next=${waiting.pay_index}`,
-        );
+        // A paid invoice exists beyond the durable cursor. That alone is NOT a
+        // wedged listener — it is almost always the listener mid-processing this
+        // very payment, before it has advanced the cursor (normal sub-second
+        // latency). Only a listener that is genuinely STUCK fails to advance.
+        // Grace-check: give it a moment, then re-read the cursor. If it moved,
+        // the listener is alive and this was transient. Only fail if it did not.
+        const next = Number(waiting.pay_index);
+        await new Promise((r) => setTimeout(r, 2500));
+        const after = Number((await g("pay_index")) || 0);
+        if (after <= payIndex) {
+          listenerBacklogPayIndex = next;
+          throw new Error(
+            `lightning listener backlog: stored=${payIndex} next=${next} (cursor did not advance in 2.5s)`,
+          );
+        }
       }
     } catch (e: any) {
       if (Number(e?.code ?? e?.errno) !== 904) throw e;
