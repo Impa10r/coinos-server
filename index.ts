@@ -198,11 +198,6 @@ app.get("/replay/:index", (req, res) => {
   res.send({});
 });
 
-app.post("/echo", (req, res) => {
-  console.log("echo", req.body);
-  res.send(req.body);
-});
-
 const host: string = process.env["HOST"] || "0.0.0.0";
 const port: number = Number.parseInt(process.env["PORT"]) || 3119;
 
