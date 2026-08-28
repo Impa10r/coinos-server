@@ -1164,6 +1164,13 @@ export default {
         const account = accountData[i];
         if (!account) continue;
 
+        // Only the custodial wallet (type "ecash") and Bitcoin vaults are
+        // supported end to end. Liquid vaults (blocked at creation since
+        // e4fea339, but pre-existing ones still have live account records)
+        // and any other stray type never got a working receive/send path,
+        // so keep them out of the list rather than showing a broken card.
+        if (account.type && account.type !== "ecash" && account.type !== "bitcoin") continue;
+
         if ((account.seed || user.seed) && account.pubkey && !account.importedAt) {
           await importAccountHistory(account);
         }
