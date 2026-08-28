@@ -35,16 +35,32 @@ let listenerEpoch = 0;
 // backoff + the retry loop below wait it out. Debounced so a burst of socket
 // errors recycles once.
 let recycleArmed = false;
+// A cl restart typically leaves its RPC socket FILE in place while the
+// process itself is down for several seconds, so ensure()'s existsSync
+// check keeps passing and a fresh client gets created and immediately
+// dies on every attempt — none of ensure()'s own (file-absent) backoff
+// applies. Without backing off here too, this fired on a fixed 100ms
+// timer with its own warn() for the entire outage (100+ log lines/10s).
+// Grow the retry delay each consecutive drop, capped at the same ceiling
+// LISTENER_RETRY_DELAY uses elsewhere in this file, and log only once per
+// outage — reset both the moment waitanyinvoice actually gets a response.
+const RECYCLE_BASE_DELAY = 100;
+let recycleDelay = RECYCLE_BASE_DELAY;
+let recycleLogged = false;
 (lnListen as any).onDrop?.(() => {
   if (!listenerActive || recycleArmed) return;
   recycleArmed = true;
   listenerActive = false;
   listenerPhase = "idle";
-  warn("lightning listener: listen socket dropped — recycling immediately");
+  if (!recycleLogged) {
+    warn("lightning listener: listen socket dropped — recycling");
+    recycleLogged = true;
+  }
   setTimeout(() => {
     recycleArmed = false;
     listenForLightning();
-  }, 100);
+  }, recycleDelay);
+  recycleDelay = Math.min(recycleDelay * 2, LISTENER_RETRY_DELAY);
 });
 
 export async function listenForLightning() {
@@ -66,6 +82,11 @@ export async function listenForLightning() {
       payIndex,
       LISTENER_WAIT_TIMEOUT_SECONDS,
     );
+
+    // The socket just answered, proving it's alive — clear any backoff/log
+    // throttle an onDrop flap left behind so the next real drop starts fresh.
+    recycleDelay = RECYCLE_BASE_DELAY;
+    recycleLogged = false;
 
     // Defense-in-depth only: waitanyinvoice should always either resolve with
     // an invoice or reject (CLN's 904 timeout, a socket error). A falsy result
@@ -205,6 +226,8 @@ export async function listenForLightning() {
       (Number(errorCode) === 904 || /timed out/i.test(errorMsg))
     ) {
       listenerRetries = 0;
+      recycleDelay = RECYCLE_BASE_DELAY;
+      recycleLogged = false;
       setTimeout(listenForLightning);
       return;
     }
