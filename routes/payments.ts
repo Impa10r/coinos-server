@@ -261,10 +261,30 @@ export default {
     const {
       params: { id },
     } = req;
-    const amount = await g(`fund:${id}`);
+    let amount = await g(`fund:${id}`);
+    let fid = id;
+
+    // A rotated fund no longer exists at its OLD id (security fix 2026-08-25:
+    // fund secret uids were rotated to invalidate an exfiltrated id list). Serve
+    // the new fund ONLY to an authenticated MANAGER of it — never anonymously or
+    // to a non-owner. An open old->new redirect would defeat the rotation, since
+    // the attacker holds the leaked OLD ids; gating on manager membership means a
+    // replayed old id reveals nothing unless you already control the fund. The
+    // route's `optional` auth populates req.user without requiring it. Bearer
+    // funds (no managers) are intentionally not recoverable this way.
+    if (typeof amount === "undefined" || amount === null) {
+      const rotatedTo = await g(`fund:rotated:${id}`);
+      const uid = req.user?.id;
+      if (rotatedTo && uid && (await db.sIsMember(`fund:${rotatedTo}:managers`, uid))) {
+        fid = rotatedTo;
+        amount = await g(`fund:${rotatedTo}`);
+      }
+    }
+
     if (typeof amount === "undefined" || amount === null)
       return bail(res, "fund not found");
-    let payments = (await db.lRange(`fund:${id}:payments`, 0, -1)) || [];
+
+    let payments = (await db.lRange(`fund:${fid}:payments`, 0, -1)) || [];
     payments = await Promise.all(payments.map((hash) => gf(`payment:${hash}`)));
 
     await Promise.all(
@@ -273,8 +293,13 @@ export default {
 
     payments = payments.filter((p) => p);
 
-    const authorization = await g(`authorization:${id}`);
-    res.send({ amount, authorization: authorization?.amount, payments });
+    const authorization = await g(`authorization:${fid}`);
+    res.send({
+      amount,
+      authorization: authorization?.amount,
+      payments,
+      ...(fid !== id ? { id: fid, rotatedFrom: id } : {}),
+    });
   },
 
   // async withdraw(req, res) {
