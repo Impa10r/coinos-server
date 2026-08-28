@@ -335,19 +335,44 @@ export default {
 
   async fund(c) {
     const id = c.req.param("id");
-    const amount = await getFundBalance(id);
+    let amount = await getFundBalance(id);
+    let fid = id;
+
+    // A rotated fund no longer exists at its OLD id (security fix 2026-08-25:
+    // fund secret uids were rotated to invalidate an exfiltrated id list). Serve
+    // the new fund ONLY to an authenticated MANAGER of it — never anonymously or
+    // to a non-owner. An open old->new redirect would defeat the rotation, since
+    // the attacker holds the leaked OLD ids; gating on manager membership means a
+    // replayed old id reveals nothing unless you already control the fund. The
+    // route's `optional` auth populates c.get("user") without requiring it.
+    // Bearer funds (no managers) are intentionally not recoverable this way.
+    if (amount === null) {
+      const rotatedTo = await g(`fund:rotated:${id}`);
+      const uid = c.get("user")?.id;
+      if (rotatedTo && uid && (await db.sIsMember(`fund:${rotatedTo}:managers`, uid))) {
+        fid = rotatedTo;
+        amount = await getFundBalance(rotatedTo);
+      }
+    }
+
     if (amount === null) return bail(c, "fund not found");
-    let payments = (await db.lRange(`fund:${id}:payments`, 0, -1)) || [];
+
+    let payments = (await db.lRange(`fund:${fid}:payments`, 0, -1)) || [];
     payments = await Promise.all(payments.map((hash) => gf(`payment:${hash}`)));
 
     await Promise.all(payments.map(async (p: any) => (p.user = await getUser(p.uid, fields))));
 
     payments = payments.filter((p) => p);
 
-    const authIds = (await db.lRange(`fund:${id}:authorizations`, 0, -1)) || [];
+    const authIds = (await db.lRange(`fund:${fid}:authorizations`, 0, -1)) || [];
     const allAuths = await Promise.all(authIds.map((authId) => g(`authorization:${authId}`)));
     const authorizations = allAuths.filter((a) => a && !a.claimed);
-    return c.json({ amount, authorizations, payments });
+    return c.json({
+      amount,
+      authorizations,
+      payments,
+      ...(fid !== id ? { id: fid, rotatedFrom: id } : {}),
+    });
   },
 
   async authorize(c) {

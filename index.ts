@@ -132,7 +132,7 @@ app.get("/payments", auth, payments.list);
 app.get("/payments/:hash", auth, payments.get);
 app.post("/parse", auth, payments.parse);
 app.get("/funds", auth, payments.funds);
-app.get("/fund/:id", payments.fund);
+app.get("/fund/:id", optional, payments.fund);
 app.get("/fund/:name/managers", payments.managers);
 app.post("/fund/managers", auth, payments.addManager);
 app.post("/fund/:name/managers/delete", auth, payments.deleteManager);
