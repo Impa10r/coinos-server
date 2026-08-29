@@ -5,7 +5,7 @@
 set -euo pipefail
 
 UUID="${1:?Usage: $0 <user-uuid> [limit]}"
-LIMIT="${2:-50}"
+LIMIT="${2:-100}"
 
 docker exec app bun -e "
 (async () => {
