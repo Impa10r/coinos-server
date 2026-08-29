@@ -78,6 +78,16 @@ export default {
   adminpass: "",
   txWebhookSecret: process.env.TX_WEBHOOK_SECRET || "pwa",
   domain: "coinos.io",
+  // Used by lib/bip353.ts (per-user BIP-353 DNS records) and lib/auth.ts (auto-
+  // ban an evicted account's source IP at the edge). apiToken needs Zone.DNS
+  // Edit + Zone.Firewall Services Edit permissions on this zone. rulesetId is
+  // an existing custom ruleset's id (Cloudflare dashboard: Security > WAF >
+  // Custom rules > the ruleset's "..." menu > "Ruleset overview" URL).
+  cloudflare: {
+    apiToken: process.env.CF_AUTH_TOKEN || "",
+    zoneId: process.env.CF_ZONE || "",
+    rulesetId: process.env.CF_RULESET_ID || "",
+  },
   mqttUrl: "mqtt://mqtt.coinos.io",
   support: "support@coinos.io",
   // SECURITY: generate fresh keys — never deploy these sample values. These are
