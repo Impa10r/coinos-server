@@ -10,6 +10,27 @@ const extractToken = (c) => {
   return getCookie(c, "token") || null;
 };
 
+// Hard eviction: an account in the `evicted` set cannot authenticate AT ALL —
+// every request, every endpoint, INCLUDING login itself (an evicted account
+// must not be able to complete a fresh login just because the resulting
+// token is what actually gets blocked; login has its own call site for this
+// in routes/users.ts, since it doesn't go through the `auth` middleware).
+// Unlike the `blacklist` freeze (which only blocks sends), this kills the
+// value of a compromised/attacker credential outright. Match on the
+// immutable uid OR username so a rename can't shake it.
+export const isEvicted = async (c, user) => {
+  if (!user) return false;
+  const evicted =
+    (await db.sIsMember("evicted", user.id)) ||
+    (await db.sIsMember("evicted", user.username?.toLowerCase?.().trim()));
+  if (evicted) {
+    // Distinctive, greppable line carrying the real source IP so the realtime
+    // auto-banner (scripts/atk-autoban.sh) can insta-ban it at Cloudflare.
+    console.error(`EVICTED_AUTH ${user.username} ${c.req.header("cf-connecting-ip")}`);
+  }
+  return evicted;
+};
+
 const authenticate = async (c) => {
   const token = extractToken(c);
   if (!token) return null;
@@ -24,22 +45,7 @@ const authenticate = async (c) => {
     if (id.endsWith("-ro") && wl[method]?.some((p) => url.startsWith(p))) id = id.slice(0, -3);
 
     const user = await getUser(id);
-
-    // Hard eviction: an account in the `evicted` set cannot authenticate AT ALL
-    // — every request, every endpoint — regardless of source IP/VPN. Unlike the
-    // `blacklist` freeze (which only blocks sends), this kills the value of a
-    // compromised/attacker JWT outright. Match on the immutable uid OR username
-    // so a rename can't shake it.
-    if (
-      user &&
-      ((await db.sIsMember("evicted", user.id)) ||
-        (await db.sIsMember("evicted", user.username?.toLowerCase?.().trim())))
-    ) {
-      // Distinctive, greppable line carrying the real source IP so the realtime
-      // auto-banner (scripts/atk-autoban.sh) can insta-ban it at Cloudflare.
-      console.error(`EVICTED_AUTH ${user.username} ${c.req.header("cf-connecting-ip")}`);
-      return null;
-    }
+    if (await isEvicted(c, user)) return null;
 
     return user;
   } catch {

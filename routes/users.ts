@@ -15,7 +15,7 @@ const sanitizeImageUrl = (url: string | undefined): string | undefined => {
   return url;
 };
 import config from "$config";
-import { requirePin } from "$lib/auth";
+import { isEvicted, requirePin } from "$lib/auth";
 import { db, g, ga, gf, gfAll, s, scan } from "$lib/db";
 import { err, l, warn } from "$lib/logging";
 import { mail, templates } from "$lib/mail";
@@ -551,6 +551,14 @@ export default {
       }
 
       if (!user) return c.json({}, 401);
+
+      // See lib/auth.ts isEvicted() — must gate login itself, not just
+      // requests made with the resulting token, or an evicted account can
+      // still complete a normal login (password/2FA verified, cookie set)
+      // and only discovers it's blocked on its first subsequent request. A
+      // client that treats that first 401 as "session expired" then retries
+      // by logging in again, looping indefinitely.
+      if (await isEvicted(c, user)) return c.json("unauthorized", 401);
 
       if (body.authPubkey && !user.authPubkey) {
         user.authPubkey = body.authPubkey;

@@ -53,7 +53,12 @@ export default {
   },
 
   async create(c) {
-    const body = await c.req.json();
+    let body;
+    try {
+      body = await c.req.json();
+    } catch {
+      return bail(c, "Invalid request body");
+    }
     const user = c.get("user");
 
     let { amount, hash, fee, fund, memo, payreq, aid, retryFor } = body;

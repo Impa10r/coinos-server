@@ -146,7 +146,7 @@ app.post("/send", auth, payments.internal);
 app.post("/bump", auth, payments.bump);
 app.get("/decode/:bolt11", payments.decode);
 app.get("/offer", auth, payments.offer);
-app.post("/fetchinvoice", payments.fetchinvoice);
+app.post("/fetchinvoice", auth, payments.fetchinvoice);
 app.post("/bitcoin/sync", auth, payments.bitcoinSync);
 
 app.get("/square/connect", auth, square.connect);
