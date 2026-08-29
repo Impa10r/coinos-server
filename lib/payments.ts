@@ -449,171 +449,183 @@ export const credit = async ({
   if (!locked) fail("Payment already being processed");
   await db.expire(lockKey, 30);
 
-  if (inv.received >= amount && inv.type !== PaymentType.bolt12) fail("Invoice already paid");
+  // This lock's only job is to serialize truly concurrent callers racing to
+  // credit the SAME in-flight settlement — it must not outlive this call.
+  // hash is a reusable receive address (a bolt12 offer, or an any-amount
+  // bitcoin/liquid address), so leaving it held for the full 30s TTL blocked
+  // every subsequent LEGITIMATE payment to that same address for up to 30
+  // real seconds after any prior one: debit() had already committed on the
+  // sender's side (sendInternal has no rollback around credit()), so the
+  // sender was silently left short with nothing credited to anyone.
+  try {
+    if (inv.received >= amount && inv.type !== PaymentType.bolt12) fail("Invoice already paid");
 
-  // usePreimage invoices keep their merchant-supplied preimage at
-  // preimage:${paymentHash} (see generate()). Prefer it as the settlement
-  // ref: external settlements already carry the same value, but internal
-  // ones pass ref=sender.id, which would otherwise be surfaced as the
-  // payment preimage and lose the secret the buyer paid for. Only once the
-  // invoice is fully paid, though — internal sends can settle partial
-  // amounts, and an underpayment must not reveal the secret.
-  if (
-    inv.paymentHash &&
-    ![PaymentType.bitcoin, PaymentType.liquid].includes(type) &&
-    inv.received + amount >= inv.amount
-  ) {
-    const stored = await db.get(`preimage:${inv.paymentHash}`);
-    if (stored) ref = String(stored);
-  }
-
-  let { path } = inv;
-  // Use the tip the sender was actually debited (passed in for internal
-  // transfers) rather than re-reading the invoice. The invoice's tip can be
-  // mutated between the sender debit and this credit (PUT /invoice), which
-  // otherwise lets a payer credit a tip they were never charged — minting
-  // balance. Fall back to the invoice tip only for external receipts
-  // (lightning/ecash) where there is no paired coinos debit to diverge from.
-  tip = tip !== undefined ? Number.parseInt(tip) || 0 : Number.parseInt(inv.tip) || 0;
-
-  if (!memo) ({ memo } = inv);
-  // Truncate rather than throw: credit() runs AFTER the payment has settled (an
-  // incoming lightning/bolt12 deposit already advanced pay_index; an internal
-  // send already debited the sender). Throwing here left the sats in the house
-  // wallet with no retry path — the payer saw a completed payment and the
-  // recipient was never credited. An oversized memo (attacker-controllable via
-  // the lnurl comment or a bolt12 payer_note) must never destroy a settled
-  // payment; a clipped note is harmless.
-  if (memo && memo.length > 5000) memo = memo.slice(0, 5000);
-  if (amount < 0 || tip < 0) fail("Invalid amount");
-  // For a NON-internal receipt the tip is only a cosmetic split of the real
-  // settled `amount` — there is no paired coinos debit carrying it — so it can
-  // never legitimately exceed `amount`. If the invoice tip was mutated via
-  // PUT /invoice to a value larger than the amount actually received, the
-  // fallback above would pull in that inflated tip and the stored record's
-  // `amount - tip` would go negative: a corrupt record that could be reversed
-  // into balance. The balance credit itself is `amount` and is unaffected, but
-  // clamp the tip so the record can never be negative. Internal transfers keep
-  // the full debited tip (their record stores the base amount, non-negative).
-  if (type !== PaymentType.internal && tip > amount) tip = amount;
-  if (type === PaymentType.internal) amount += tip;
-
-  const user = await getUser(inv.uid);
-  const { id: uid } = user;
-  const creditAccount = aid && aid !== uid ? await g(`account:${aid}`) : null;
-  const currency = creditAccount?.currency || user.currency;
-
-  const rates = await g("rates");
-  let rate = rates[currency];
-
-  if (!rate) await sleep(1000);
-  rate = rates[currency];
-
-  const equivalentRate = inv.rate * (rates[currency] / rates[inv.currency]);
-
-  if (Math.abs(inv.rate / rates[inv.currency] - 1) < 0.01) {
-    rate = equivalentRate;
-  } else {
-    // warn("rate slipped", hash, invoice.rate, equivalentRate);
-  }
-
-  const id = v4();
-  const p = {
-    aid,
-    id,
-    iid: inv.id,
-    hash,
-    amount: amount - tip,
-    path,
-    uid,
-    rate,
-    currency,
-    memo,
-    payment_hash,
-    ref,
-    tip,
-    type,
-    confirmed: true,
-    created: created || Date.now(),
-    items: undefined,
-    ...(assetAmount !== undefined && { assetAmount }),
-    ...(assetType !== undefined && { assetType }),
-    ...(ourfee !== undefined && { ourfee }),
-  };
-
-  if ([PaymentType.bitcoin, PaymentType.liquid].includes(type)) inv.pending += amount;
-  else {
-    inv.received += amount;
-    inv.preimage = ref;
-    inv.settled = Date.now();
-  }
-
-  if (assetType !== undefined) inv.assetType = assetType;
-  if (assetAmount !== undefined) inv.assetAmount = assetAmount;
-
-  let balanceKey = "balance";
-  if ([PaymentType.bitcoin, PaymentType.liquid].includes(type)) {
-    const [txid, vout] = ref.split(":").slice(-2);
-    p.confirmed = false;
-    balanceKey = "pending";
-    await s(`payment:${txid}:${vout}`, id);
-    // Mirror the txid:vout pointer into arc so future bulk /confirm sweeps find
-    // the prior credit via gf() fallback and don't double-credit. See
-    // feedback_apr29_double_credit_incident.md for the incident this prevents.
-    await sa(`payment:${txid}:${vout}`, id);
-  } else {
-    await s(`payment:${hash}`, id);
-    await sa(`payment:${hash}`, id);
-  }
-
-  // Idempotency guard for external settlements. The getPayment() pre-check in
-  // the lightning listener/replay is not atomic: N concurrent re-credits of the
-  // same payment all read it as uncredited before any writes the pointer, so
-  // each runs the incrBy below — the /replay double-credit race. SET NX is
-  // atomic, so only the first caller claims the settlement and credits; the rest
-  // bail here, before the incrBy. `ref` is the lightning preimage, unique per
-  // settlement; internal/fund/ecash pass ref=uid and are exempt.
-  if ([PaymentType.lightning, PaymentType.bolt12].includes(type) && ref) {
-    const claimed = await db.set(`credited:${ref}`, id, { NX: true });
-    if (!claimed) {
-      warn("duplicate credit blocked", hash, ref);
-      return;
+    // usePreimage invoices keep their merchant-supplied preimage at
+    // preimage:${paymentHash} (see generate()). Prefer it as the settlement
+    // ref: external settlements already carry the same value, but internal
+    // ones pass ref=sender.id, which would otherwise be surfaced as the
+    // payment preimage and lose the secret the buyer paid for. Only once the
+    // invoice is fully paid, though — internal sends can settle partial
+    // amounts, and an underpayment must not reveal the secret.
+    if (
+      inv.paymentHash &&
+      ![PaymentType.bitcoin, PaymentType.liquid].includes(type) &&
+      inv.received + amount >= inv.amount
+    ) {
+      const stored = await db.get(`preimage:${inv.paymentHash}`);
+      if (stored) ref = String(stored);
     }
+
+    let { path } = inv;
+    // Use the tip the sender was actually debited (passed in for internal
+    // transfers) rather than re-reading the invoice. The invoice's tip can be
+    // mutated between the sender debit and this credit (PUT /invoice), which
+    // otherwise lets a payer credit a tip they were never charged — minting
+    // balance. Fall back to the invoice tip only for external receipts
+    // (lightning/ecash) where there is no paired coinos debit to diverge from.
+    tip = tip !== undefined ? Number.parseInt(tip) || 0 : Number.parseInt(inv.tip) || 0;
+
+    if (!memo) ({ memo } = inv);
+    // Truncate rather than throw: credit() runs AFTER the payment has settled (an
+    // incoming lightning/bolt12 deposit already advanced pay_index; an internal
+    // send already debited the sender). Throwing here left the sats in the house
+    // wallet with no retry path — the payer saw a completed payment and the
+    // recipient was never credited. An oversized memo (attacker-controllable via
+    // the lnurl comment or a bolt12 payer_note) must never destroy a settled
+    // payment; a clipped note is harmless.
+    if (memo && memo.length > 5000) memo = memo.slice(0, 5000);
+    if (amount < 0 || tip < 0) fail("Invalid amount");
+    // For a NON-internal receipt the tip is only a cosmetic split of the real
+    // settled `amount` — there is no paired coinos debit carrying it — so it can
+    // never legitimately exceed `amount`. If the invoice tip was mutated via
+    // PUT /invoice to a value larger than the amount actually received, the
+    // fallback above would pull in that inflated tip and the stored record's
+    // `amount - tip` would go negative: a corrupt record that could be reversed
+    // into balance. The balance credit itself is `amount` and is unaffected, but
+    // clamp the tip so the record can never be negative. Internal transfers keep
+    // the full debited tip (their record stores the base amount, non-negative).
+    if (type !== PaymentType.internal && tip > amount) tip = amount;
+    if (type === PaymentType.internal) amount += tip;
+
+    const user = await getUser(inv.uid);
+    const { id: uid } = user;
+    const creditAccount = aid && aid !== uid ? await g(`account:${aid}`) : null;
+    const currency = creditAccount?.currency || user.currency;
+
+    const rates = await g("rates");
+    let rate = rates[currency];
+
+    if (!rate) await sleep(1000);
+    rate = rates[currency];
+
+    const equivalentRate = inv.rate * (rates[currency] / rates[inv.currency]);
+
+    if (Math.abs(inv.rate / rates[inv.currency] - 1) < 0.01) {
+      rate = equivalentRate;
+    } else {
+      // warn("rate slipped", hash, invoice.rate, equivalentRate);
+    }
+
+    const id = v4();
+    const p = {
+      aid,
+      id,
+      iid: inv.id,
+      hash,
+      amount: amount - tip,
+      path,
+      uid,
+      rate,
+      currency,
+      memo,
+      payment_hash,
+      ref,
+      tip,
+      type,
+      confirmed: true,
+      created: created || Date.now(),
+      items: undefined,
+      ...(assetAmount !== undefined && { assetAmount }),
+      ...(assetType !== undefined && { assetType }),
+      ...(ourfee !== undefined && { ourfee }),
+    };
+
+    if ([PaymentType.bitcoin, PaymentType.liquid].includes(type)) inv.pending += amount;
+    else {
+      inv.received += amount;
+      inv.preimage = ref;
+      inv.settled = Date.now();
+    }
+
+    if (assetType !== undefined) inv.assetType = assetType;
+    if (assetAmount !== undefined) inv.assetAmount = assetAmount;
+
+    let balanceKey = "balance";
+    if ([PaymentType.bitcoin, PaymentType.liquid].includes(type)) {
+      const [txid, vout] = ref.split(":").slice(-2);
+      p.confirmed = false;
+      balanceKey = "pending";
+      await s(`payment:${txid}:${vout}`, id);
+      // Mirror the txid:vout pointer into arc so future bulk /confirm sweeps find
+      // the prior credit via gf() fallback and don't double-credit. See
+      // feedback_apr29_double_credit_incident.md for the incident this prevents.
+      await sa(`payment:${txid}:${vout}`, id);
+    } else {
+      await s(`payment:${hash}`, id);
+      await sa(`payment:${hash}`, id);
+    }
+
+    // Idempotency guard for external settlements. The getPayment() pre-check in
+    // the lightning listener/replay is not atomic: N concurrent re-credits of the
+    // same payment all read it as uncredited before any writes the pointer, so
+    // each runs the incrBy below — the /replay double-credit race. SET NX is
+    // atomic, so only the first caller claims the settlement and credits; the rest
+    // bail here, before the incrBy. `ref` is the lightning preimage, unique per
+    // settlement; internal/fund/ecash pass ref=uid and are exempt.
+    if ([PaymentType.lightning, PaymentType.bolt12].includes(type) && ref) {
+      const claimed = await db.set(`credited:${ref}`, id, { NX: true });
+      if (!claimed) {
+        warn("duplicate credit blocked", hash, ref);
+        return;
+      }
+    }
+
+    let creditType = type;
+    if (creditType === PaymentType.bolt12) creditType = PaymentType.lightning;
+    const isPending = balanceKey === "pending";
+
+    await tbCredit(aid || uid, uid, creditType, amount, isPending);
+
+    await db
+      .multi()
+      .set(`invoice:${inv.id}`, JSON.stringify(inv))
+      .set(`payment:${p.id}`, JSON.stringify(p))
+      .lPush(`${aid || uid}:payments`, p.id)
+      .set(`${aid || uid}:payments:last`, p.created)
+      .exec();
+
+    // Mirror the payment record + invoice into arc for the same protection.
+    await sa(`payment:${p.id}`, p);
+    await sa(`invoice:${inv.id}`, inv);
+
+    if (inv.items?.length) {
+      formatReceipt(inv.items, inv.currency);
+      p.items = inv.items;
+    }
+
+    await completePayment(inv, p, user);
+
+    return p;
+  } finally {
+    await db.del(lockKey);
   }
-
-  let creditType = type;
-  if (creditType === PaymentType.bolt12) creditType = PaymentType.lightning;
-  const isPending = balanceKey === "pending";
-
-  await tbCredit(aid || uid, uid, creditType, amount, isPending);
-
-  await db
-    .multi()
-    .set(`invoice:${inv.id}`, JSON.stringify(inv))
-    .set(`payment:${p.id}`, JSON.stringify(p))
-    .lPush(`${aid || uid}:payments`, p.id)
-    .set(`${aid || uid}:payments:last`, p.created)
-    .exec();
-
-  // Mirror the payment record + invoice into arc for the same protection.
-  await sa(`payment:${p.id}`, p);
-  await sa(`invoice:${inv.id}`, inv);
-
-  if (inv.items?.length) {
-    formatReceipt(inv.items, inv.currency);
-    p.items = inv.items;
-  }
-
-  await completePayment(inv, p, user);
-
-  return p;
 };
 
 export const completePayment = async (inv, p, user) => {
   const { id, username } = user;
   const aid = p.aid || id;
   const account = aid !== id ? await g(`account:${aid}`) : null;
-  const autowithdraw = account?.autowithdraw;
+  const autowithdraw = account?.autowithdraw ?? user.autowithdraw;
   const threshold = account?.threshold ?? user.threshold;
   const reserve = account?.reserve ?? user.reserve;
   const destination = account?.destination ?? user.destination;
