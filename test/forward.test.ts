@@ -155,7 +155,12 @@ describe("completePayment", () => {
       created: Date.now(),
     };
 
-    mockLnXpay.mockImplementationOnce(async () => {
+    // sendLightning() dispatches the actual xpay call fire-and-forget (so a
+    // slow/failed payment can't hang the caller) — a rejection there can't
+    // propagate back through this synchronous await. Fail at ln.decode()
+    // instead, which sendLightning() does await directly, to exercise the
+    // same "forward attempt threw" path completePayment's catch handles.
+    mockLnDecode.mockImplementationOnce(async () => {
       throw new Error("route not found");
     });
 

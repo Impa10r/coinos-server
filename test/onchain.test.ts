@@ -98,19 +98,27 @@ const resetAll = () => {
   seedUser(makeUser());
 };
 
-const makeRes = () => {
+// Minimal Hono Context stand-in for testing route handlers directly (Hono
+// itself isn't in the loop here — no real request ever gets parsed/routed).
+const makeC = (body: any) => {
   let sent: any;
+  let status = 200;
   return {
-    send: (data: any) => {
-      sent = data;
+    req: {
+      json: async () => body,
+      param: () => undefined,
+      query: () => ({}),
+      header: () => undefined,
     },
-    code: (_code: number) => ({
-      send: (data: any) => {
-        sent = data;
-      },
-    }),
+    json: (data: any, code?: number) => {
+      sent = data;
+      status = code ?? 200;
+      return { data, status };
+    },
+    get: () => undefined,
     getSent: () => sent,
-  };
+    getStatus: () => status,
+  } as any;
 };
 
 // =====================================================================
@@ -324,14 +332,15 @@ describe("processWatchedTx", () => {
 describe("confirm (liquid)", () => {
   beforeEach(resetAll);
 
-  test("ignores non-liquid types", async () => {
-    const req = {
-      body: { txid: "btctx100", wallet: "test", type: PaymentType.bitcoin },
-    };
-    const res = makeRes();
+  test("ignores non-liquid/bitcoin types", async () => {
+    // confirm(c) handles both bitcoin and liquid walletnotify callbacks on this
+    // one endpoint (see data/{bitcoin,liquid}/transaction.sh) — bitcoin is NOT
+    // an ignored type here, so exercise the early-return with a type it
+    // genuinely doesn't process.
+    const c = makeC({ txid: "btctx100", wallet: "test", type: PaymentType.lightning, secret: "test" });
 
-    await routes.confirm(req as any, res as any);
-    expect((res as any).getSent()).toEqual({});
+    await routes.confirm(c);
+    expect(c.getSent()).toEqual({});
     expect(mockTbCredit).not.toHaveBeenCalled();
   });
 
@@ -354,13 +363,10 @@ describe("confirm (liquid)", () => {
       }),
     };
 
-    const req = {
-      body: { txid: "lqtx001", wallet: "test", type: PaymentType.liquid },
-    };
-    const res = makeRes();
+    const c = makeC({ txid: "lqtx001", wallet: "test", type: PaymentType.liquid, secret: "test" });
 
-    await routes.confirm(req as any, res as any);
-    expect((res as any).getSent()).toEqual({});
+    await routes.confirm(c);
+    expect(c.getSent()).toEqual({});
 
     // Payment should be created via credit()
     const pid = JSON.parse(store().kvStore[`payment:lqtx001:0`]);
@@ -401,12 +407,9 @@ describe("confirm (liquid)", () => {
       }),
     };
 
-    const req = {
-      body: { txid: "lqtx002", wallet: "test", type: PaymentType.liquid },
-    };
-    const res = makeRes();
+    const c = makeC({ txid: "lqtx002", wallet: "test", type: PaymentType.liquid, secret: "test" });
 
-    await routes.confirm(req as any, res as any);
+    await routes.confirm(c);
 
     // Payment confirmed
     const p = JSON.parse(store().kvStore[`payment:${pendingPayment.id}`]);
@@ -437,12 +440,9 @@ describe("confirm (liquid)", () => {
       }),
     };
 
-    const req = {
-      body: { txid: "lqtx003", wallet: "test", type: PaymentType.liquid },
-    };
-    const res = makeRes();
+    const c = makeC({ txid: "lqtx003", wallet: "test", type: PaymentType.liquid, secret: "test" });
 
-    await routes.confirm(req as any, res as any);
+    await routes.confirm(c);
     expect(mockTbCredit).not.toHaveBeenCalled();
     expect(mockTbConfirm).not.toHaveBeenCalled();
   });
@@ -463,12 +463,9 @@ describe("confirm (liquid)", () => {
       }),
     };
 
-    const req = {
-      body: { txid: "lqtx004", wallet: "test", type: PaymentType.liquid },
-    };
-    const res = makeRes();
+    const c = makeC({ txid: "lqtx004", wallet: "test", type: PaymentType.liquid, secret: "test" });
 
-    await routes.confirm(req as any, res as any);
+    await routes.confirm(c);
     expect(mockTbCredit).not.toHaveBeenCalled();
   });
 
@@ -494,12 +491,9 @@ describe("confirm (liquid)", () => {
       }),
     };
 
-    const req = {
-      body: { txid: "lqtx005", wallet: "test", type: PaymentType.liquid },
-    };
-    const res = makeRes();
+    const c = makeC({ txid: "lqtx005", wallet: "test", type: PaymentType.liquid, secret: "test" });
 
-    await routes.confirm(req as any, res as any);
+    await routes.confirm(c);
     expect(mockTbCredit).not.toHaveBeenCalled();
   });
 
@@ -533,12 +527,9 @@ describe("confirm (liquid)", () => {
       }),
     };
 
-    const req = {
-      body: { txid: "lqtx006", wallet: "test", type: PaymentType.liquid },
-    };
-    const res = makeRes();
+    const c = makeC({ txid: "lqtx006", wallet: "test", type: PaymentType.liquid, secret: "test" });
 
-    await routes.confirm(req as any, res as any);
+    await routes.confirm(c);
     expect(mockTbConfirm).not.toHaveBeenCalled();
   });
 });

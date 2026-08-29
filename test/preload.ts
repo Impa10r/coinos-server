@@ -147,6 +147,11 @@ if (process.env.INTEGRATION) {
           kv()[k] = String(v);
           return v;
         },
+        decrBy: async (k: string, n: number) => {
+          const v = Number.parseInt(kv()[k] || "0") - n;
+          kv()[k] = String(v);
+          return v;
+        },
         watch: async () => {},
         multi: makeMulti,
         expire: async () => 1,
