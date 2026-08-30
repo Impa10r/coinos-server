@@ -20,25 +20,57 @@ jobs:
           git remote add upstream https://github.com/coinos/coinos-server.git
           git fetch upstream master
 
-      # Fail the run — rather than filing a GitHub issue — when upstream is
-      # ahead of origin/main. Issues are disabled on this fork, so an
-      # issue-based tracker 410s outright; a failed scheduled run doesn't
-      # depend on that (or any other) repo feature toggle, and GitHub already
-      # emails on a failed scheduled workflow by default, which is the actual
-      # notification this is for. The tradeoff: it stays red every day the
-      # fork is behind, rather than only once — that's an accurate reflection
-      # of the state, not a bug.
-      - name: Fail if behind upstream
+      # This fork tracks upstream via cherry-pick, not merge, so a raw
+      # `git rev-list --count origin/main..upstream/master` is meaningless:
+      # cherry-picking rewrites commit SHAs, so a commit already incorporated
+      # (by content) still shows up in that diff forever, under its original
+      # upstream SHA, even though this fork's version of it has a different
+      # SHA. That count is 113 on this repo and will realistically never hit
+      # zero — it was a false signal, not a real "commits to review" number.
+      #
+      # Instead, treat a commit as genuinely new only if its exact commit
+      # title has no match anywhere in origin/main's history. git cherry-pick
+      # preserves the original subject line by default, so an exact title
+      # match reliably means "already incorporated" even when the resulting
+      # diff no longer matches the raw upstream patch (surrounding code has
+      # since evolved). See CLAUDE.md for the full reasoning and the
+      # `--fixed-strings` + `^…$` anchor pitfall (anchors become literal
+      # characters under --fixed-strings, silently breaking every match).
+      #
+      # This still isn't perfect signal: a commit whose content was folded
+      # into a differently-titled local commit (independent parallel fix,
+      # framework migration that made the upstream patch moot, etc.) has no
+      # title match and will show up here as a false "new" — confirmed on
+      # this repo for a fastify v4->v5 bump (fastify was since removed
+      # entirely) and a cookie-flags fix (already applied under an unrelated
+      # commit message). Treat a hit below as "worth a two-minute glance,"
+      # not "definitely needs cherry-picking."
+      - name: Check for genuinely new upstream commits
         run: |
-          COUNT=$(git rev-list --count origin/main..upstream/master)
-          if [ "$COUNT" -eq 0 ]; then
-            echo "Up to date with upstream/master."
+          NEW_LOG=""
+          while read -r sha; do
+            title=$(git log -1 --format='%s' "$sha")
+            found=0
+            while IFS= read -r candidate; do
+              if [ "$candidate" = "$title" ]; then
+                found=1
+                break
+              fi
+            done < <(git log origin/main --format='%s' --fixed-strings --grep="$title")
+            if [ "$found" -eq 0 ]; then
+              line=$(git log -1 --pretty=format:'- %h %s (%an, %ad)' --date=short "$sha")
+              NEW_LOG="${NEW_LOG}${line}"$'\n'
+            fi
+          done < <(git rev-list --reverse origin/main..upstream/master)
+
+          if [ -z "$NEW_LOG" ]; then
+            echo "Up to date with upstream/master (every upstream commit's title already matches something in this fork's main, even under a different SHA from cherry-picking)."
             exit 0
           fi
-          echo "$COUNT commit(s) on coinos/coinos-server master not yet in this fork's main:"
+
+          echo "Possibly-new commit(s) on coinos/coinos-server master (no matching title anywhere in this fork's main — some may already be covered under a different commit message; see workflow comments):"
           echo
-          git log --pretty=format:'- %h %s (%an, %ad)' --date=short origin/main..upstream/master
-          echo
+          printf '%s' "$NEW_LOG"
           echo
           echo "Review with: git fetch upstream && git log main..upstream/master"
           exit 1
