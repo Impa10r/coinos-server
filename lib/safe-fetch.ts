@@ -2,18 +2,27 @@
 // resolution in routes/lnurl.ts). Rejects any host that resolves to a
 // loopback, private, link-local, CGNAT, or cloud-metadata address.
 //
-// Unlike a resolve-then-fetch guard (which re-resolves DNS when it actually
-// connects, leaving a DNS-rebinding TOCTOU window), this pins the socket to the
-// exact IP it validated: the connection's DNS lookup IS the validation, in one
-// callback, so a low-TTL rebind cannot swap in an internal IP after the check.
-// Redirects are followed manually and each hop is re-validated the same way.
-// Scheme is restricted to http(s); 8s timeout; 2MB streamed-body cap.
+// Resolves and validates the host BEFORE connecting, then connects directly
+// to that exact validated IP (Host header + TLS servername overridden back to
+// the original hostname so routing/SNI still work) — so there is no
+// resolve-then-connect gap for a low-TTL DNS-rebinding attacker to slip an
+// internal address into. Redirects are followed manually and each hop is
+// re-validated the same way. Scheme is restricted to http(s); 8s timeout;
+// 2MB streamed-body cap.
 //
-// .onion hosts skip the pinned-lookup path entirely: Tor's socks5h routing
+// NOTE: this deliberately does NOT use Node's `lookup` option on
+// http(s).request to pin the connection — that seemed like the more obvious
+// implementation, but Bun's http(s).request has a bug where a custom `lookup`
+// breaks the underlying connection (confirmed: plain net.connect and
+// tls.connect both work fine with the same lookup function; only
+// http(s).request's own connection path fails, reproducibly, agent or not).
+// Resolving up front and connecting straight to the IP sidesteps it entirely
+// and is (Bun bug aside) the same security property either way.
+//
+// .onion hosts skip resolution/validation entirely: Tor's socks5h routing
 // resolves them on the proxy side, never through Node's own DNS, so there is
 // no local hostname to validate — and a caller-supplied SOCKS5 proxy agent
-// (see extraOpts below) takes over connection establishment itself, bypassing
-// the `lookup` option regardless of what it's set to.
+// (see extraOpts below) takes over connection establishment itself.
 import http from "node:http";
 import https from "node:https";
 import dns from "node:dns";
@@ -53,90 +62,78 @@ const isBlockedIp = (ip: string): boolean => {
   return true; // not a recognizable IP -> block
 };
 
-// A drop-in for the Node dns.lookup used by http(s).request: resolves the host,
-// rejects the whole connection if ANY resolved address is blocked (so an
-// attacker can't return [public, private] and hope the stack picks the private
-// one), and otherwise hands the socket the first allowed address. Because the
-// address returned here is the one the socket connects to, there is no
-// resolve/connect gap for a rebind to slip through.
-const pinnedLookup = (
-  hostname: string,
-  options: any,
-  cb: (err: Error | null, address?: any, family?: number) => void,
-): void => {
-  // hostname may be an IP literal (redirect to a raw IP) — validate directly.
-  if (net.isIP(hostname)) {
-    if (isBlockedIp(hostname)) return cb(new Error(`blocked host ${hostname}`));
-    const fam = net.isIPv6(hostname) ? 6 : 4;
-    return cb(null, options?.all ? [{ address: hostname, family: fam }] : hostname, fam);
-  }
-  dns.lookup(hostname, { all: true }, (err, addrs: any[]) => {
-    if (err) return cb(err);
-    if (!addrs?.length) return cb(new Error(`cannot resolve ${hostname}`));
-    const bad = addrs.find((a) => isBlockedIp(a.address));
-    if (bad) return cb(new Error(`blocked host ${hostname} -> ${bad.address}`));
-    const a = addrs[0];
-    if (options?.all) cb(null, [{ address: a.address, family: a.family }]);
-    else cb(null, a.address, a.family);
+// Resolve a hostname and validate every returned address (not just the first
+// — an attacker returning [public, private] and hoping the stack picks the
+// private one is exactly the bypass this guards against), then return the
+// first address to actually connect to. An IP literal is validated directly.
+const resolveAndValidate = (hostname: string): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const literal = hostname.replace(/^\[|\]$/g, ""); // strip IPv6 literal brackets
+    if (net.isIP(literal)) {
+      if (isBlockedIp(literal)) return reject(new Error(`blocked host ${literal}`));
+      return resolve(literal);
+    }
+    dns.lookup(hostname, { all: true }, (err, addrs) => {
+      if (err) return reject(err);
+      if (!addrs?.length) return reject(new Error(`cannot resolve ${hostname}`));
+      const bad = addrs.find((a) => isBlockedIp(a.address));
+      if (bad) return reject(new Error(`blocked host ${hostname} -> ${bad.address}`));
+      resolve(addrs[0].address);
+    });
   });
-};
 
-const fetchOnce = (
+const fetchOnce = async (
   url: string,
   redirectsLeft: number,
   extraOpts: Record<string, any> = {},
-): Promise<any> =>
-  new Promise((resolve, reject) => {
-    let u: URL;
-    try {
-      u = new URL(url);
-    } catch {
-      return reject(new Error("invalid url"));
-    }
-    if (u.protocol !== "http:" && u.protocol !== "https:")
-      return reject(new Error("unsupported scheme"));
+): Promise<any> => {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    throw new Error("invalid url");
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:")
+    throw new Error("unsupported scheme");
 
-    const isOnion = u.hostname.toLowerCase().endsWith(".onion");
+  const isOnion = u.hostname.toLowerCase().endsWith(".onion");
+  const mod = u.protocol === "https:" ? https : http;
 
-    // CRITICAL: Node skips the custom `lookup` when the URL host is already an
-    // IP literal, so pinnedLookup alone would not see a raw-IP SSRF target.
-    // Validate any literal host up front (strip IPv6 brackets first). Skipped
-    // for .onion — not a real SSRF concern there (see file header), and
-    // .onion hostnames are never IP literals anyway.
-    if (!isOnion) {
-      const literal = u.hostname.replace(/^\[|\]$/g, "");
-      if (net.isIP(literal) && isBlockedIp(literal))
-        return reject(new Error(`blocked host ${literal}`));
-    }
+  // extraOpts carries a caller-supplied proxy agent (SOCKS5/Tor) through to
+  // the underlying request — used for .onion targets, without every caller
+  // needing to know the SSRF-guard internals. Accept either a single Agent
+  // or the got-style { http, https } pair (routes/lnurl.ts's existing call
+  // shape) and resolve it to the one matching this request's protocol.
+  const { agent: rawAgent, ...restOpts } = extraOpts;
+  const agent =
+    rawAgent && typeof rawAgent === "object" && ("http" in rawAgent || "https" in rawAgent)
+      ? mod === https
+        ? rawAgent.https
+        : rawAgent.http
+      : rawAgent;
 
-    const mod = u.protocol === "https:" ? https : http;
+  // Not resolvable locally at all for .onion — hand the hostname through
+  // as-is and let the proxy agent (required for this to actually connect)
+  // resolve and route it on the Tor side.
+  const host = isOnion ? u.hostname : await resolveAndValidate(u.hostname);
+  const port = u.port ? Number(u.port) : mod === https ? 443 : 80;
 
-    // extraOpts carries a caller-supplied proxy agent (SOCKS5/Tor) through to
-    // the underlying request — used for .onion targets, without every caller
-    // needing to know the SSRF-guard internals. Accept either a single Agent
-    // or the got-style { http, https } pair (routes/lnurl.ts's existing call
-    // shape) and resolve it to the one matching this request's protocol.
-    const { agent: rawAgent, ...restOpts } = extraOpts;
-    const agent =
-      rawAgent && typeof rawAgent === "object" && ("http" in rawAgent || "https" in rawAgent)
-        ? mod === https
-          ? rawAgent.https
-          : rawAgent.http
-        : rawAgent;
-
+  return new Promise((resolve, reject) => {
     const req = mod.request(
-      url,
       {
+        host,
+        port,
+        path: `${u.pathname}${u.search}`,
         method: "GET",
-        headers: { accept: "application/json" },
-        ...(isOnion ? {} : { lookup: pinnedLookup as any }),
+        headers: { accept: "application/json", host: u.hostname },
+        ...(mod === https ? { servername: u.hostname } : {}),
         ...(agent ? { agent } : {}),
         ...restOpts,
       },
       (res) => {
         const status = res.statusCode || 0;
 
-        // manual redirect handling — re-validate each hop via pinnedLookup
+        // manual redirect handling — re-resolve + re-validate each hop
         if (status >= 300 && status < 400 && res.headers.location) {
           res.resume(); // drain
           if (redirectsLeft <= 0) return reject(new Error("too many redirects"));
@@ -173,6 +170,7 @@ const fetchOnce = (
     req.on("error", reject);
     req.end();
   });
+};
 
 // Fetch a user-supplied URL with SSRF protection and return the parsed JSON
 // body. Throws on a bad scheme/URL or a host that resolves into a blocked
