@@ -9,7 +9,6 @@ jobs:
   check:
     runs-on: ubuntu-latest
     permissions:
-      issues: write
       contents: read
     steps:
       - uses: actions/checkout@v4
@@ -21,56 +20,25 @@ jobs:
           git remote add upstream https://github.com/coinos/coinos-server.git
           git fetch upstream master
 
-      - name: Diff against origin/main
-        id: check
+      # Fail the run — rather than filing a GitHub issue — when upstream is
+      # ahead of origin/main. Issues are disabled on this fork, so an
+      # issue-based tracker 410s outright; a failed scheduled run doesn't
+      # depend on that (or any other) repo feature toggle, and GitHub already
+      # emails on a failed scheduled workflow by default, which is the actual
+      # notification this is for. The tradeoff: it stays red every day the
+      # fork is behind, rather than only once — that's an accurate reflection
+      # of the state, not a bug.
+      - name: Fail if behind upstream
         run: |
           COUNT=$(git rev-list --count origin/main..upstream/master)
-          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
-          if [ "$COUNT" -gt 0 ]; then
-            git log --pretty=format:'- [`%h`](https://github.com/coinos/coinos-server/commit/%H) %s (%an, %ad)' \
-              --date=short origin/main..upstream/master > /tmp/commits.md
+          if [ "$COUNT" -eq 0 ]; then
+            echo "Up to date with upstream/master."
+            exit 0
           fi
-
-      - name: Create or update tracking issue
-        if: steps.check.outputs.count != '0'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require("fs");
-            const label = "upstream-sync";
-            const count = "${{ steps.check.outputs.count }}";
-            const body = [
-              `**${count}** commit(s) on \`coinos/coinos-server\` \`master\` not yet in this fork's \`main\`:`,
-              "",
-              fs.readFileSync("/tmp/commits.md", "utf8"),
-              "",
-              "Review with:",
-              "```",
-              "git fetch upstream && git log main..upstream/master",
-              "```",
-              "Close this issue once merged — the next run will open a fresh one if upstream moves again.",
-            ].join("\n");
-
-            const { data: issues } = await github.rest.issues.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: "open",
-              labels: label,
-            });
-
-            if (issues.length > 0) {
-              await github.rest.issues.update({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issues[0].number,
-                body,
-              });
-            } else {
-              await github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title: "Upstream (coinos/coinos-server) has new commits",
-                body,
-                labels: [label],
-              });
-            }
+          echo "$COUNT commit(s) on coinos/coinos-server master not yet in this fork's main:"
+          echo
+          git log --pretty=format:'- %h %s (%an, %ad)' --date=short origin/main..upstream/master
+          echo
+          echo
+          echo "Review with: git fetch upstream && git log main..upstream/master"
+          exit 1
