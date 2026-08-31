@@ -128,7 +128,8 @@ export default {
           // brand-new funds (an existing fund, however it got its id, keeps
           // working) — getFundBalance() returns null iff the TigerBeetle
           // fund account hasn't been created yet.
-          if (!isUuid(fund) && (await getFundBalance(fund)) === null) {
+          const isNewFund = (await getFundBalance(fund)) === null;
+          if (!isUuid(fund) && isNewFund) {
             const ip = getClientIp(c);
             err(`SECURITY: non-uuid fund name "${fund}" by ${user.username}`);
             await evictUser(user, `non-uuid fund name: ${fund}`, ip);
@@ -143,6 +144,15 @@ export default {
           if (await g(`fund:${fund}:disabled`)) {
             const whitelisted = await db.sIsMember("whitelist", user.username?.toLowerCase().trim());
             if (!whitelisted) fail("This fund has been disabled");
+          }
+          // Freeze only blocks ESTABLISHING a brand-new fund, not funding an
+          // existing one — take()/authorize() (gift-link claims, adding to a
+          // fund someone's already sharing) stay unaffected by a freeze, since
+          // those are ordinary use of funds that already exist, not new
+          // exposure being created. Whitelisted accounts are exempt.
+          if (isNewFund && ((await g("hardfreeze")) || (await g("freeze")))) {
+            const whitelisted = await db.sIsMember("whitelist", user.username?.toLowerCase().trim());
+            if (!whitelisted) fail("Fund creation temporarily disabled");
           }
           p = await debit({
             hash: v4(),
@@ -1113,6 +1123,17 @@ export default {
     const sender = c.get("user");
 
     try {
+      // debit()'s own frozen check exempts type=internal outright (only
+      // hardfreeze blocks it there) — tighten that here: a soft freeze
+      // should still pause user-to-user transfers for non-whitelisted
+      // accounts, since this is a fresh transfer of value between accounts,
+      // not claiming an already-established fund (see create()'s fund
+      // branch / take() for why those stay unaffected by a freeze).
+      if ((await g("hardfreeze")) || (await g("freeze"))) {
+        const whitelisted = await db.sIsMember("whitelist", sender.username?.toLowerCase().trim());
+        if (!whitelisted) fail("Internal transfers temporarily disabled");
+      }
+
       const recipient = await getUser(username);
       // sendInternal -> generate() throws the far less clear "user not
       // provided" for this same case, uncaught here until now — fail with a
