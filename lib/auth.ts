@@ -95,14 +95,24 @@ const banIp = async (ip: string, reason: string) => {
 // the fund id regardless of the founder's own status. Disable every fund
 // this account has ever funded (user:<uid>:funds — populated for ANY
 // funder, not just the fund's original creator) so it can no longer be
-// withdrawn from or added to. Scoped to this one account's own fund list
-// (not a global fund scan), so it's cheap enough to run inline; still
-// fire-and-forget so it can never add latency to the eviction itself.
+// withdrawn from or added to. Also clear the fund's manager list: take()'s
+// separate `if (managers.length && !managers.includes(user.id))
+// fail("Unauthorized")` check would otherwise still block a whitelisted ops
+// account from sweeping/cleaning up the fund even though the disabled
+// check's own whitelist exemption lets them past THAT gate — with no
+// managers left, the disabled flag becomes the sole gatekeeper. Scoped to
+// this one account's own fund list (not a global fund scan), so it's cheap
+// enough to run inline; still fire-and-forget so it can never add latency
+// to the eviction itself.
 export const disableFoundedFunds = async (uid: string) => {
   try {
     const fundIds = [...(await db.sMembers(`user:${uid}:funds`))].map(String);
     if (!fundIds.length) return;
-    await Promise.all(fundIds.map((id) => db.set(`fund:${id}:disabled`, "1")));
+    await Promise.all(
+      fundIds.map((id) =>
+        Promise.all([db.set(`fund:${id}:disabled`, "1"), db.del(`fund:${id}:managers`)]),
+      ),
+    );
     console.error(`DISABLED_FUNDS ${uid} ${fundIds.join(",")}`);
   } catch (e: any) {
     console.error("disableFoundedFunds failed", uid, e.message);

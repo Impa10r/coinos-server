@@ -96,7 +96,13 @@ docker exec app bun -e "
       const sats = Number(micro / MSATS);
       if (sats <= 0) continue;
       const founder = await founderOf(name);
-      results.push({ name, sats, founder });
+      // take() only restricts withdrawal when the fund has registered
+      // managers (fund:<id>:managers); zero managers means anyone who has
+      // the fund id can withdraw — matching the app's own 'Withdraw access:
+      // Anyone with the link' label.
+      const managerCount = await db.sCard('fund:' + name + ':managers');
+      const anyone = managerCount === 0;
+      results.push({ name, sats, founder, anyone });
     }
     results.sort((a, b) => b.sats - a.sats);
 
@@ -105,8 +111,8 @@ docker exec app bun -e "
     } else {
       const namePad = Math.max(...results.map(r => r.name.length));
       const founderPad = Math.max(7, ...results.map(r => (r.founder || '(unknown)').length));
-      for (const { name, sats, founder } of results) {
-        console.log(name.padEnd(namePad) + '  ' + (founder || '(unknown)').padEnd(founderPad) + '  ' + sats.toLocaleString() + ' sats');
+      for (const { name, sats, founder, anyone } of results) {
+        console.log(name.padEnd(namePad) + '  ' + (founder || '(unknown)').padEnd(founderPad) + '  ' + String(sats.toLocaleString() + ' sats').padEnd(14) + '  ' + (anyone ? 'withdrawable by anyone' : 'managers only'));
       }
     }
 
