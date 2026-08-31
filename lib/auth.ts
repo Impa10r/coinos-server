@@ -86,19 +86,21 @@ const banIp = async (ip: string, reason: string) => {
 // must not be able to complete a fresh login just because the resulting
 // token is what actually gets blocked; login has its own call site for this
 // in routes/users.ts, since it doesn't go through the `auth` middleware).
-// Unlike the `blacklist` freeze (which only blocks sends), this kills the
-// value of a compromised/attacker credential outright. Match on the
-// immutable uid OR username so a rename can't shake it.
-// Auto-eviction: called from abuse-detection points elsewhere in the app
-// (e.g. attempting to create a fund under a non-UUID name) to hard-kill an
-// account the instant it's caught, without waiting for manual admin action.
-// Adds to the same `evicted` set isEvicted() checks, so the account is dead
-// starting with its very next request. Also bans the current IP immediately
-// — via the same Cloudflare Rulesets call isEvicted() uses — rather than
-// waiting on that next request to trip isEvicted()'s own ban.
+// Match on the immutable uid OR username so a rename can't shake it.
+//
+// Eviction alone does NOT freeze spending — it only blocks the evicted
+// account from making its OWN authenticated requests. Some code paths debit
+// a user fetched independently of the request's caller (e.g. take()'s
+// authorization-claim funding step debits the authorization's original
+// creator, looked up by uid, regardless of who is calling /take) — those
+// bypass isEvicted() entirely and are only stopped by debit()'s `blacklist`
+// check (which reserves the account's whole balance as unspendable via
+// tbDebit's frozen-balance argument). evictUser() below adds to BOTH sets so
+// a hard eviction can't leave a compromised account's balance reachable
+// through a path like that.
 export const evictUser = async (user: any, reason: string, ip?: string) => {
   if (!user?.id) return;
-  await db.sAdd("evicted", user.id);
+  await Promise.all([db.sAdd("evicted", user.id), db.sAdd("blacklist", user.id)]);
   console.error(`AUTO_EVICT ${user.username} ${reason} ${ip ?? ""}`);
   if (ip) void banIp(ip, reason);
 };
@@ -114,6 +116,12 @@ export const isEvicted = async (c, user) => {
     // though the ban below is now automatic, for visibility/search in logs.
     console.error(`EVICTED_AUTH ${user.username} ${ip}`);
     if (ip) void banIp(ip, user.username);
+    // Backfill blacklist for an account evicted manually (an admin adding
+    // only to `evicted`, not through evictUser()) — without it, eviction
+    // blocks this account's own requests but leaves its balance reachable
+    // through a path that debits a user fetched independently of the
+    // caller (see evictUser()'s comment above).
+    void db.sAdd("blacklist", user.id);
   }
   return evicted;
 };
