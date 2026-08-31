@@ -441,6 +441,11 @@ export default () => {
           }
           await reply({ result_type: method, ...result });
         } catch (e) {
+          // Stale client state (deleted app or migrated user) isn't a server
+          // fault — rethrow so the outer catch's existing handling takes
+          // over: it skips this err() log and sends the correct NIP-47
+          // UNAUTHORIZED reply instead of the generic INTERNAL one below.
+          if (e.message === "pubkey not found" || e.message === "user not found") throw e;
           err("problem with nwc", pubkey, method, JSON.stringify(params), e.message);
           try {
             await reply({

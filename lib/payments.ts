@@ -1861,8 +1861,17 @@ export const catchUp = async () => {
         for (const tx of txs as any) {
           await processWatchedTx(tx);
         }
-      } catch (e) {
-        err("catchUp address check failed", address, e.message);
+      } catch (e: any) {
+        // "Invoice already paid" is the routine, expected outcome for the
+        // overwhelming majority of catchUp runs: this is a redundant/backup
+        // sweep of already-watched addresses, and most of them were already
+        // credited by the primary listener before catchUp ever got to them.
+        // Only genuinely unexpected failures warrant an err()-level report.
+        if (e?.message === "Invoice already paid") {
+          l("catchUp address already credited", address);
+        } else {
+          err("catchUp address check failed", address, e.message);
+        }
       }
     }
 

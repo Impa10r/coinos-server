@@ -19,18 +19,31 @@ const fiveMinutes = 1000 * 60 * 5;
 
 const proxyAgent = LNURL_PROXY ? new SocksProxyAgent(LNURL_PROXY) : undefined;
 
-// v3 payment addresses (coinos v3 / halwallet) are registered here.
-const NAMES_URL = process.env.NAMES_URL || "https://names.coinos.io";
+// v3 payment addresses (coinos v3 / halwallet) are registered here. Opt-in
+// only — no hardcoded default — so a fork/self-hosted instance that isn't
+// part of the coinos v3 migration doesn't pay a registrar round-trip (and a
+// repeated timeout, since names.coinos.io doesn't know its users at all) on
+// every single lnurlp lookup for a name that's obviously local.
+const NAMES_URL = process.env.NAMES_URL;
 
 // Does the v3 registrar serve this name? Returns its payRequest, or null.
 // Cached briefly: claims change on the order of days, and this sits on the
-// payment path for every coinos.io address lookup. Only definitive answers
-// (payRequest / 404) are cached — a sick registrar shouldn't be remembered.
+// payment path for every coinos.io address lookup. Definitive answers
+// (payRequest / 404) get the full TTL. A timeout/network failure also gets
+// cached, but only for FAIL_TTL (a small fraction of the full TTL) — every
+// lnurlp lookup for a purely-local name (e.g. an ops account never claimed
+// on v3) was otherwise re-eating the full request timeout on EVERY single
+// request during a registrar outage, since an uncached failure means the
+// very next lookup pays the same timeout again with no backoff. A short
+// failure cache absorbs a burst of requests during an outage without
+// remembering a "sick registrar" anywhere near as long as a real answer.
 const registrarCache = new Map();
 const REGISTRAR_TTL = 60_000;
+const REGISTRAR_FAIL_TTL = 10_000;
 async function registrarLookup(name: string) {
+  if (!NAMES_URL) return null;
   const hit = registrarCache.get(name);
-  if (hit && Date.now() - hit.at < REGISTRAR_TTL) return hit.body;
+  if (hit && Date.now() - hit.at < hit.ttl) return hit.body;
   try {
     const r = await fetch(
       `${NAMES_URL}/.well-known/lnurlp/${encodeURIComponent(name)}?domain=${host}`,
@@ -39,13 +52,14 @@ async function registrarLookup(name: string) {
     if (r.ok) {
       const body: any = await r.json();
       if (body?.tag === "payRequest") {
-        registrarCache.set(name, { at: Date.now(), body });
+        registrarCache.set(name, { at: Date.now(), ttl: REGISTRAR_TTL, body });
         return body;
       }
     }
-    if (r.status === 404) registrarCache.set(name, { at: Date.now(), body: null });
+    if (r.status === 404) registrarCache.set(name, { at: Date.now(), ttl: REGISTRAR_TTL, body: null });
   } catch (e) {
     warn("names registrar lookup failed for", name, (e as any).message);
+    registrarCache.set(name, { at: Date.now(), ttl: REGISTRAR_FAIL_TTL, body: null });
   }
   return null;
 }
