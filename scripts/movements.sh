@@ -42,7 +42,7 @@ docker exec app bun -e "
   const pad  = (s, n) => String(s ?? '').padEnd(n);
   const rpad = (s, n) => String(s ?? '').padStart(n);
 
-  console.log(pad('date', 20) + pad('type', 10) + rpad('amount', 9) + rpad('fee', 7) + rpad('ourfee', 8) + rpad('balance', 9) + '  hash/id');
+  console.log(pad('date', 20) + pad('type', 10) + rpad('amount', 9) + rpad('tip', 7) + rpad('fee', 7) + rpad('ourfee', 8) + rpad('balance', 9) + '  hash/id');
   console.log('-'.repeat(120));
 
   let running = 0;
@@ -54,7 +54,7 @@ docker exec app bun -e "
     const tip    = parseInt(p.tip)    || 0;
     running += amt < 0 ? amt - fee - ourfee - tip : amt + tip;
     const hash = p.hash || p.ref || p.id || '';
-    console.log(pad(dt(p.created), 20) + pad(p.type, 10) + rpad((amt >= 0 ? '+' : '') + amt, 9) + rpad(fee ? '-' + fee : '', 7) + rpad(ourfee ? '-' + ourfee : '', 8) + rpad(running, 9) + '  ' + hash);
+    console.log(pad(dt(p.created), 20) + pad(p.type, 10) + rpad((amt >= 0 ? '+' : '') + amt, 9) + rpad(tip ? '+' + tip : '', 7) + rpad(fee ? '-' + fee : '', 7) + rpad(ourfee ? '-' + ourfee : '', 8) + rpad(running, 9) + '  ' + hash);
   }
 
   console.log('-'.repeat(120));
