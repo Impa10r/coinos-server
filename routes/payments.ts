@@ -353,45 +353,53 @@ export default {
   },
 
   async fund(c) {
-    const id = c.req.param("id");
-    let amount = await getFundBalance(id);
-    let fid = id;
+    try {
+      const id = c.req.param("id");
+      let amount = await getFundBalance(id);
+      let fid = id;
 
-    // A rotated fund no longer exists at its OLD id (security fix 2026-08-25:
-    // fund secret uids were rotated to invalidate an exfiltrated id list). Serve
-    // the new fund ONLY to an authenticated MANAGER of it — never anonymously or
-    // to a non-owner. An open old->new redirect would defeat the rotation, since
-    // the attacker holds the leaked OLD ids; gating on manager membership means a
-    // replayed old id reveals nothing unless you already control the fund. The
-    // route's `optional` auth populates c.get("user") without requiring it.
-    // Bearer funds (no managers) are intentionally not recoverable this way.
-    if (amount === null) {
-      const rotatedTo = await g(`fund:rotated:${id}`);
-      const uid = c.get("user")?.id;
-      if (rotatedTo && uid && (await db.sIsMember(`fund:${rotatedTo}:managers`, uid))) {
-        fid = rotatedTo;
-        amount = await getFundBalance(rotatedTo);
+      // A rotated fund no longer exists at its OLD id (security fix 2026-08-25:
+      // fund secret uids were rotated to invalidate an exfiltrated id list). Serve
+      // the new fund ONLY to an authenticated MANAGER of it — never anonymously or
+      // to a non-owner. An open old->new redirect would defeat the rotation, since
+      // the attacker holds the leaked OLD ids; gating on manager membership means a
+      // replayed old id reveals nothing unless you already control the fund. The
+      // route's `optional` auth populates c.get("user") without requiring it.
+      // Bearer funds (no managers) are intentionally not recoverable this way.
+      if (amount === null) {
+        const rotatedTo = await g(`fund:rotated:${id}`);
+        const uid = c.get("user")?.id;
+        if (rotatedTo && uid && (await db.sIsMember(`fund:${rotatedTo}:managers`, uid))) {
+          fid = rotatedTo;
+          amount = await getFundBalance(rotatedTo);
+        }
       }
+
+      if (amount === null) return bail(c, "fund not found");
+
+      let payments = (await db.lRange(`fund:${fid}:payments`, 0, -1)) || [];
+      payments = await Promise.all(payments.map((hash) => gf(`payment:${hash}`)));
+      // Filter out stale/missing payment ids BEFORE looking up .user on each —
+      // a dangling id in fund:<id>:payments resolves to null here, and
+      // assigning p.user on a null payment crashed with "null is not an
+      // object (evaluating 'p.uid')".
+      payments = payments.filter((p) => p);
+
+      await Promise.all(payments.map(async (p: any) => (p.user = await getUser(p.uid, fields))));
+
+      const authIds = (await db.lRange(`fund:${fid}:authorizations`, 0, -1)) || [];
+      const allAuths = await Promise.all(authIds.map((authId) => g(`authorization:${authId}`)));
+      const authorizations = allAuths.filter((a) => a && !a.claimed);
+      return c.json({
+        amount,
+        authorizations,
+        payments,
+        ...(fid !== id ? { id: fid, rotatedFrom: id } : {}),
+      });
+    } catch (e: any) {
+      err("problem fetching fund", c.req.param("id"), e.message);
+      return bail(c, e.message);
     }
-
-    if (amount === null) return bail(c, "fund not found");
-
-    let payments = (await db.lRange(`fund:${fid}:payments`, 0, -1)) || [];
-    payments = await Promise.all(payments.map((hash) => gf(`payment:${hash}`)));
-
-    await Promise.all(payments.map(async (p: any) => (p.user = await getUser(p.uid, fields))));
-
-    payments = payments.filter((p) => p);
-
-    const authIds = (await db.lRange(`fund:${fid}:authorizations`, 0, -1)) || [];
-    const allAuths = await Promise.all(authIds.map((authId) => g(`authorization:${authId}`)));
-    const authorizations = allAuths.filter((a) => a && !a.claimed);
-    return c.json({
-      amount,
-      authorizations,
-      payments,
-      ...(fid !== id ? { id: fid, rotatedFrom: id } : {}),
-    });
   },
 
   async authorize(c) {
