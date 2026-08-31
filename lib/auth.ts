@@ -28,26 +28,15 @@ const appendCloudflareBanList = async (ip: string, reason: string) => {
   const itemsUrl = `https://api.cloudflare.com/client/v4/accounts/${accountId}/rules/lists/${bannedIpListId}/items`;
 
   try {
-    // The `cf:banned` redis set can drift from what's actually on the
-    // Cloudflare list (a redis flush/restore, or an IP added manually —
-    // e.g. the existing "goat14" entry) — read the list first so a
-    // stale/missing redis entry never produces a duplicate item on
-    // Cloudflare's side. Paginated: the Items endpoint caps each page.
-    let cursor: string | undefined;
-    do {
-      const url = new URL(itemsUrl);
-      url.searchParams.set("per_page", "1000");
-      if (cursor) url.searchParams.set("cursor", cursor);
-      const res = await fetch(url, { headers });
-      const data = (await res.json().catch(() => ({}))) as any;
-      if (!data.success) {
-        console.error("cloudflare ban-list read failed", JSON.stringify(data.errors));
-        return; // unknown list state — don't risk a duplicate append
-      }
-      if ((data.result || []).some((item: any) => item.ip === ip)) return; // already listed
-      cursor = data.result_info?.cursors?.after;
-    } while (cursor);
-
+    // No pre-read/dedupe check: Cloudflare's cursor for this endpoint
+    // returned "invalid or expired cursor" on the very next paginated
+    // request in production, which made a failed read abort the append
+    // entirely — silently disabling the whole ban mechanism, worse than
+    // the duplicate it was meant to prevent. The `cf:banned` redis SADD
+    // guard in banIp() already skips this call for any IP this app has
+    // already banned; a duplicate item can only happen if that set drifts
+    // from Cloudflare's list (a redis flush, or an IP added manually), and
+    // a harmless duplicate list entry is an acceptable cost for that.
     const res = await fetch(itemsUrl, {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },
