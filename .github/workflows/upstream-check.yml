@@ -44,11 +44,21 @@ jobs:
       # this repo for a fastify v4->v5 bump (fastify was since removed
       # entirely) and a cookie-flags fix (already applied under an unrelated
       # commit message). Treat a hit below as "worth a two-minute glance,"
-      # not "definitely needs cherry-picking."
+      # not "definitely needs cherry-picking." Once actually verified, add
+      # the SHA to .github/upstream-verified-ignore.txt so the same commit
+      # doesn't keep re-alerting daily — that file's own header explains the
+      # format and the bar for adding an entry.
       - name: Check for genuinely new upstream commits
         run: |
+          IGNORE_FILE=".github/upstream-verified-ignore.txt"
+          is_ignored() {
+            [ -f "$IGNORE_FILE" ] || return 1
+            grep -v '^\s*#' "$IGNORE_FILE" | grep -v '^\s*$' | awk '{print $1}' | grep -qx "$1"
+          }
+
           NEW_LOG=""
           while read -r sha; do
+            if is_ignored "$sha"; then continue; fi
             title=$(git log -1 --format='%s' "$sha")
             found=0
             while IFS= read -r candidate; do

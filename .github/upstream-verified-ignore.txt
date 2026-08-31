@@ -1,0 +1,53 @@
+# Upstream commits manually verified as already incorporated into this
+# fork's main, despite having no title match (the heuristic
+# upstream-check.yml's default check relies on). Content was independently
+# confirmed present — via a differently-titled local commit, an
+# architecture that already supersedes what the commit adds, or the change
+# being moot after a later migration (e.g. a framework swap) — by reading
+# the actual diffs, not just comparing titles. See each entry's comment for
+# the specific reason; see CLAUDE.md for the general methodology.
+#
+# Format: one full 40-char commit SHA per line, `#` starts a comment,
+# blank lines ignored. upstream-check.yml skips any SHA listed here.
+#
+# Add an entry only after actually verifying the content is present — this
+# file silences the daily check for that commit forever, so a wrong entry
+# here would hide a real gap.
+
+# All of the following are pre-existing sendLightning/finalize
+# instrumentation and leak-guard tuning against the OLD synchronous xpay
+# implementation. This fork's sendLightning is fire-and-forget
+# (completeLightningInBackground in lib/payments.ts), which already
+# contains equivalent or superior verification/leak-guard logic. Verified
+# by reading completeLightningInBackground's current implementation
+# against each of these patches' stated intent.
+9fca61790af069dc150a6923c89d119c537e512c # sendLightning / sendKeysend: only reverse when CLN reports the payment failed
+b8e194affb096af2468624c4863803c7fa406b6e # log when listpays verification itself errors
+fe767002dd59f000d54fd09c9d617d69b9a5c894 # tighten LEAKED DEBIT guard: don't false-alarm on successful-via-fallback paths
+cb0f1962238534ce0fa2261373a018bf34a868f5 # sendLightning: silence success-case xpay log, re-read db before leak guard
+caebad1dd85188f4315751c6ce77f92d7a1588c2 # sendLightning: stop warning on healthy multi-path payments
+2ea66724f331d4f24a0ca83a91ef90c27ed07353 # sendLightning / finalize: drop chatty per-send INFO logs
+8aba0bc2e3b5d09b3783b87eb0a29088b40796e4 # finalize: don't crash on non-integer fee delta (db.incrBy NaN) — finalize() already has this fix (Math.max(0,...) + Number.isFinite guard), just under different code shape
+
+# Moot after this fork's Fastify -> Hono migration; fastify isn't in
+# package.json at all anymore.
+d6adcee27747ad92b8ce4de1350c692f5032dfdd # deps: upgrade fastify v4 to v5 line to fix dependabot alerts
+
+# Already applied under an unrelated commit message — httpOnly/secure
+# cookie flags confirmed present in routes/users.ts.
+f9e8638b2443ebf2da2e11eb12d1a8d60bf7c9d6 # logging: redact auth headers; set cookie flags on session token (S5)
+
+# lnurl.ts's local-vs-v3-registrar resolution order already matches the
+# combined intent of this whole cluster of commits (confirmed by reading
+# the current registrarLookup()/lnurlp() implementation).
+239f1fd498b4511d8c6a1f4ae4c8cc3b5aeb7b5f # LNURL: fall back to the v3 names registrar for unknown users
+fb63b96ec90e32bc8adc5b77b2735097dde16bbd # Let a migrated account hand its address to coinos v3
+e35c0af04fafd6e069d0d1e67664bcaed8c9c671 # lnurl: serve local accounts directly instead of deferring to v3 registrar
+bc5b34f053cf35c11a68e57a9c43c987331452a7 # lnurl: defer to the v3 registrar for names it has claimed
+
+# Already-incorporated dependency/cleanup commits, confirmed by content.
+3c4d0b6914bbc7ecf49312a264d55af3c2e2d7a6 # remove /gateway endpoint
+a44bcd511da7216c4cd3782ac24997cc7a82f186 # deps: bump file-type 18->21 and uuid 8->11 (Dependabot)
+2e90d709178ac718e4f32229951e6ea38dfcc371 # Merge remote-tracking branch 'origin/master' (merge commit, nothing to pick)
+fb09303ff274a241c28cccc0cd29550f6e59d0b2 # confirm: guard the first-seen deposit credit atomically (COINOS-2)
+28e93331a16c962572a3ce55aee3f9b22a1cc74e # deps: refresh bun.lockb with sharp 0.35.3 (S7/S19)
