@@ -87,11 +87,34 @@ const banIp = async (ip: string, reason: string) => {
 // tbDebit's frozen-balance argument). evictUser() below adds to BOTH sets so
 // a hard eviction can't leave a compromised account's balance reachable
 // through a path like that.
+// A fund is withdrawable by "anyone with the link" (see take()/authorize()
+// in routes/payments.ts) — its own balance check never looks at who founded
+// or funded it, only at the fund's own TigerBeetle balance. Blacklisting
+// the evicted account (above) does nothing for money already sitting in a
+// fund: it's a separate TigerBeetle account, reachable by anyone who knows
+// the fund id regardless of the founder's own status. Disable every fund
+// this account has ever funded (user:<uid>:funds — populated for ANY
+// funder, not just the fund's original creator) so it can no longer be
+// withdrawn from or added to. Scoped to this one account's own fund list
+// (not a global fund scan), so it's cheap enough to run inline; still
+// fire-and-forget so it can never add latency to the eviction itself.
+export const disableFoundedFunds = async (uid: string) => {
+  try {
+    const fundIds = [...(await db.sMembers(`user:${uid}:funds`))].map(String);
+    if (!fundIds.length) return;
+    await Promise.all(fundIds.map((id) => db.set(`fund:${id}:disabled`, "1")));
+    console.error(`DISABLED_FUNDS ${uid} ${fundIds.join(",")}`);
+  } catch (e: any) {
+    console.error("disableFoundedFunds failed", uid, e.message);
+  }
+};
+
 export const evictUser = async (user: any, reason: string, ip?: string) => {
   if (!user?.id) return;
   await Promise.all([db.sAdd("evicted", user.id), db.sAdd("blacklist", user.id)]);
   console.error(`AUTO_EVICT ${user.username} ${reason} ${ip ?? ""}`);
   if (ip) void banIp(ip, reason);
+  void disableFoundedFunds(user.id);
 };
 
 export const isEvicted = async (c, user) => {
@@ -105,12 +128,13 @@ export const isEvicted = async (c, user) => {
     // though the ban below is now automatic, for visibility/search in logs.
     console.error(`EVICTED_AUTH ${user.username} ${ip}`);
     if (ip) void banIp(ip, user.username);
-    // Backfill blacklist for an account evicted manually (an admin adding
-    // only to `evicted`, not through evictUser()) — without it, eviction
-    // blocks this account's own requests but leaves its balance reachable
-    // through a path that debits a user fetched independently of the
-    // caller (see evictUser()'s comment above).
+    // Backfill blacklist + fund-disabling for an account evicted manually
+    // (an admin adding only to `evicted`, not through evictUser()) — without
+    // this, eviction blocks this account's own requests but leaves its
+    // balance AND any fund it founded reachable (see evictUser()'s comments
+    // above for both).
     void db.sAdd("blacklist", user.id);
+    void disableFoundedFunds(user.id);
   }
   return evicted;
 };

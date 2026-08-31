@@ -134,6 +134,16 @@ export default {
             await evictUser(user, `non-uuid fund name: ${fund}`, ip);
             fail("Invalid fund name");
           }
+          // Per-fund kill-switch — see authorize()/take() in this file. Set
+          // automatically when the fund's founder is evicted; block adding
+          // MORE money to it too, not just withdrawing. Whitelisted callers
+          // (trusted ops accounts) are exempt so a fund can still be swept/
+          // cleaned up deliberately, same exemption debit()'s own frozen/
+          // limit checks already give them.
+          if (await g(`fund:${fund}:disabled`)) {
+            const whitelisted = await db.sIsMember("whitelist", user.username?.toLowerCase().trim());
+            if (!whitelisted) fail("This fund has been disabled");
+          }
           p = await debit({
             hash: v4(),
             amount,
@@ -415,6 +425,15 @@ export default {
       const body = await c.req.json();
       const { id, fiat, currency, amount } = body;
 
+      // Per-fund kill-switch: set automatically (see lib/auth.ts's
+      // evictUser()/isEvicted()) when the fund's founder is evicted, since a
+      // fund's own balance check has no other way to know that. Whitelisted
+      // callers are exempt — see the same check in create()'s fund branch.
+      if (await g(`fund:${id}:disabled`)) {
+        const whitelisted = await db.sIsMember("whitelist", user.username?.toLowerCase().trim());
+        if (!whitelisted) fail("This fund has been disabled");
+      }
+
       const managers = [...(await db.sMembers(`fund:${id}:managers`))];
       if (managers.length && !managers.includes(uid)) fail("Unauthorized");
 
@@ -485,6 +504,12 @@ export default {
     try {
       // Kill-switch — see authorize().
       if (await g("fund:disabled")) fail("Fund transfers temporarily disabled");
+      // Per-fund kill-switch — see authorize(). Whitelisted callers are
+      // exempt so a tainted fund can still be deliberately swept/cleaned up.
+      if (await g(`fund:${id}:disabled`)) {
+        const whitelisted = await db.sIsMember("whitelist", user.username?.toLowerCase().trim());
+        if (!whitelisted) fail("This fund has been disabled");
+      }
 
       amount = Number.parseInt(amount);
       if (!Number.isFinite(amount) || amount <= 0) fail("Invalid amount");
