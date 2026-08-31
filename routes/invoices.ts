@@ -29,12 +29,16 @@ export default {
   async create(c) {
     const body = await c.req.json();
     let user = c.get("user");
-    const { invoice } = body;
+    // Copy rather than mutate the parsed body's invoice object directly —
+    // Bun/JavaScriptCore has thrown "Attempted to assign to readonly
+    // property" here on some requests, implying the parsed JSON result can
+    // come back non-extensible under some condition; a shallow copy sidesteps
+    // that regardless of the exact cause.
+    const invoice = { ...body.invoice };
 
     if (body.user) user = body.user;
     if (!user) return bail(c, "user not provided");
-    if (c.get("user")?.username === user.username) invoice.own = true;
-    else invoice.own = false;
+    invoice.own = c.get("user")?.username === user.username;
 
     try {
       const result = await generate({ invoice, user });

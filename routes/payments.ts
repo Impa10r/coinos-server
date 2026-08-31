@@ -1079,8 +1079,17 @@ export default {
     const { username, amount } = body;
     const sender = c.get("user");
 
-    const recipient = await getUser(username);
-    return c.json(await sendInternal({ amount, sender, recipient }));
+    try {
+      const recipient = await getUser(username);
+      // sendInternal -> generate() throws the far less clear "user not
+      // provided" for this same case, uncaught here until now — fail with a
+      // reason a caller can actually act on.
+      if (!recipient) fail("recipient not found");
+      return c.json(await sendInternal({ amount, sender, recipient }));
+    } catch (e: any) {
+      warn(sender?.username, "internal send failed", username, e.message);
+      return bail(c, e.message);
+    }
   },
 
   async decode(c) {
