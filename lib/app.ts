@@ -1,4 +1,5 @@
 import config from "$config";
+import { db } from "$lib/db";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
@@ -10,6 +11,19 @@ const app = new Hono();
 
 const reqLogger = pino((pino as any).destination("req"));
 const resLogger = pino((pino as any).destination("res"));
+
+// IP blacklist — the app-level enforcement layer for the `cf:banned` redis
+// set that lib/auth.ts's banIp() maintains. Checked first, before CORS/rate-
+// limiting/routing, so a banned IP is rejected as cheaply as possible. This
+// exists independent of (and faster than) the Cloudflare edge rule the same
+// set feeds: that sync is best-effort, subject to the account's ruleset rule
+// cap, and racy under concurrent bans, so this is the layer that always
+// takes effect the instant an IP is added to the set.
+app.use("*", async (c, next) => {
+  const ip = c.req.header("cf-connecting-ip");
+  if (ip && (await db.sIsMember("cf:banned", ip))) return c.text("Forbidden", 403);
+  await next();
+});
 
 // CORS
 app.use(
