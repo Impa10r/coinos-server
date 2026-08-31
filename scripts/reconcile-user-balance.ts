@@ -12,7 +12,7 @@
 //   docker exec -it app bun scripts/reconcile-user-balance.ts <uid>
 
 import { db } from "$lib/db";
-import { getBalance } from "$lib/tb";
+import { getBalance, initTigerBeetle } from "$lib/tb";
 import { getPayment, getUser } from "$lib/utils";
 
 const uid = process.argv[2];
@@ -20,6 +20,8 @@ if (!uid) {
   console.error("usage: bun scripts/reconcile-user-balance.ts <uid>");
   process.exit(1);
 }
+
+await initTigerBeetle();
 
 const user: any = await getUser(uid);
 if (!user) {
