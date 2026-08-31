@@ -11,82 +11,47 @@ const extractToken = (c) => {
   return getCookie(c, "token") || null;
 };
 
-// Description marker for every rule this feature has ever created — both
-// the old one-rule-per-IP format (`coinos evicted-auth: <reason>`, one POST
-// per ban) and the current single consolidated rule below. Filtering on this
-// prefix is how syncCloudflareBanRule finds (and replaces) its own rule(s)
-// without touching anything else on the ruleset.
-const CF_RULE_DESCRIPTION_PREFIX = "coinos evicted-auth";
-
-// Push the full `cf:banned` IP set to Cloudflare's edge as ONE rule (an
-// `ip.src in {...}` set-membership expression), replacing whatever rule(s)
-// this feature previously created. The old version created a brand-new rule
-// PER banned IP, which hit the account's custom-ruleset rule cap ("6 out of
-// 5") after only a handful of bans — GET+PUT the whole ruleset instead of
-// individual rule create/update calls so this self-heals that: any leftover
-// per-IP rules from the old code get folded into the same single rule on the
-// next ban. Stateless by design (always re-derives from `cf:banned`, never
-// tracks a rule id) so it can't drift from what's actually banned.
-const syncCloudflareBanRule = async () => {
-  const { apiToken, zoneId, rulesetId } = config.cloudflare || {};
-  if (!apiToken || !zoneId || !rulesetId) return;
-
-  const headers = {
-    Authorization: `Bearer ${apiToken}`,
-    "Content-Type": "application/json",
-  };
+// Append a banned IP to the Cloudflare IP List (Manage account >
+// Configurations > Lists) that the account's single "coinos evicted-auth"
+// custom rule references via `ip.src in $<list name>` — see
+// config.ts.sample for the one-time dashboard setup (create the list once,
+// point one rule at it). Unlike editing a rule/ruleset directly, the rule
+// itself never changes — only the list's membership does — so there's no
+// rule-count cap to hit (the earlier per-IP-rule version hit the account's
+// 5-rule cap after a handful of bans) and no risk of clobbering unrelated
+// rules by rewriting the ruleset.
+const appendCloudflareBanList = async (ip: string, reason: string) => {
+  const { apiToken, accountId, bannedIpListId } = config.cloudflare || {};
+  if (!apiToken || !accountId || !bannedIpListId) return;
 
   try {
-    const ips = [...(await db.sMembers("cf:banned"))].map(String);
-    if (!ips.length) return;
-
-    const getRes = await fetch(
-      `https://api.cloudflare.com/client/v4/zones/${zoneId}/rulesets/${rulesetId}`,
-      { headers },
-    );
-    const getData = (await getRes.json().catch(() => ({}))) as any;
-    // Bail rather than proceed on an empty/guessed rule list — a failed GET
-    // treated as "no other rules" would PUT an empty set and silently wipe
-    // any unrelated rules already on this ruleset.
-    if (!getData.success) {
-      console.error("cloudflare ruleset fetch failed, skipping ban-rule sync", JSON.stringify(getData.errors));
-      return;
-    }
-    const existingRules: any[] = getData?.result?.rules || [];
-    const keptRules = existingRules.filter(
-      (r: any) => !String(r.description || "").startsWith(CF_RULE_DESCRIPTION_PREFIX),
-    );
-
-    const rules = [
-      ...keptRules,
+    const res = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/rules/lists/${bannedIpListId}/items`,
       {
-        description: `${CF_RULE_DESCRIPTION_PREFIX}: auto-banned IPs`,
-        expression: `(ip.src in {${ips.join(" ")}})`,
-        action: "block",
-        enabled: true,
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify([{ ip, comment: reason.slice(0, 100) }]),
       },
-    ];
-
-    const putRes = await fetch(
-      `https://api.cloudflare.com/client/v4/zones/${zoneId}/rulesets/${rulesetId}`,
-      { method: "PUT", headers, body: JSON.stringify({ rules }) },
     );
-    const putData = (await putRes.json().catch(() => ({}))) as any;
-    if (!putData.success)
-      console.error("cloudflare ban-rule sync failed", JSON.stringify(putData.errors));
+    const data = (await res.json().catch(() => ({}))) as any;
+    if (!data.success)
+      console.error("cloudflare ban-list append failed", ip, JSON.stringify(data.errors));
   } catch (e: any) {
-    console.error("cloudflare ban-rule sync request failed", e.message);
+    console.error("cloudflare ban-list append request failed", ip, e.message);
   }
 };
 
 // Ban a source IP: adds it to the `cf:banned` redis set (the app-level
 // blacklist enforced on every request — see lib/app.ts) and, if Cloudflare
-// is configured, pushes the full set to the edge as one consolidated rule.
-// Used to auto-ban the instant an evicted (hard-killed) account's credential
-// is used again. The eviction check elsewhere already 401s the request
-// regardless; this is a second layer so the same IP can't immediately try
-// other stolen credentials or keep probing. Fire-and-forget and fully
-// best-effort: must never add latency to, or fail, the actual auth check.
+// is configured, appends it to the edge IP list above. Used to auto-ban the
+// instant an evicted (hard-killed) account's credential is used again. The
+// eviction check elsewhere already 401s the request regardless; this is a
+// second layer so the same IP can't immediately try other stolen
+// credentials or keep probing. Fire-and-forget and fully best-effort: must
+// never add latency to, or fail, the actual auth check.
 const banIp = async (ip: string, reason: string) => {
   if (!net.isIP(ip)) return;
 
@@ -96,7 +61,7 @@ const banIp = async (ip: string, reason: string) => {
   if (!added) return;
   console.error(`IP_BANNED ${ip} ${reason}`);
 
-  void syncCloudflareBanRule();
+  void appendCloudflareBanList(ip, reason);
 };
 
 // Hard eviction: an account in the `evicted` set cannot authenticate AT ALL —

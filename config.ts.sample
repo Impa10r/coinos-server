@@ -80,13 +80,21 @@ export default {
   domain: "coinos.io",
   // Used by lib/bip353.ts (per-user BIP-353 DNS records) and lib/auth.ts (auto-
   // ban an evicted account's source IP at the edge). apiToken needs Zone.DNS
-  // Edit + Zone.Firewall Services Edit permissions on this zone. rulesetId is
-  // an existing custom ruleset's id (Cloudflare dashboard: Security > WAF >
-  // Custom rules > the ruleset's "..." menu > "Ruleset overview" URL).
+  // Edit + Account.Account Filter Lists Edit permissions. rulesetId (unused
+  // by the IP-ban path, kept for bip353.ts-adjacent tooling) is an existing
+  // custom ruleset's id (Cloudflare dashboard: Security > WAF > Custom rules
+  // > the ruleset's "..." menu > "Ruleset overview" URL). The IP ban itself
+  // appends to a Cloudflare IP List (Manage account > Configurations >
+  // Lists) rather than editing a rule — create the list once, add a single
+  // custom rule with expression `ip.src in $<list name>`, and set
+  // accountId/bannedIpListId below to that list's account + list id (visible
+  // in the list's dashboard URL: dash.cloudflare.com/<accountId>/.../lists/<bannedIpListId>).
   cloudflare: {
     apiToken: process.env.CF_AUTH_TOKEN || "",
     zoneId: process.env.CF_ZONE || "",
     rulesetId: process.env.CF_RULESET_ID || "",
+    accountId: process.env.CF_ACCOUNT_ID || "",
+    bannedIpListId: process.env.CF_BANNED_IP_LIST_ID || "",
   },
   mqttUrl: "mqtt://mqtt.coinos.io",
   support: "support@coinos.io",
