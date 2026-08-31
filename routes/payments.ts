@@ -158,113 +158,118 @@ export default {
 
   async list(c) {
     const user = c.get("user");
-    let { id } = user;
-    let aid = c.req.query("aid");
-    const start = c.req.query("start");
-    const end = c.req.query("end");
-    let limit = c.req.query("limit");
-    let offset = c.req.query("offset");
-    const received = c.req.query("received");
+    try {
+      let { id } = user;
+      let aid = c.req.query("aid");
+      const start = c.req.query("start");
+      const end = c.req.query("end");
+      let limit = c.req.query("limit");
+      let offset = c.req.query("offset");
+      const received = c.req.query("received");
 
-    if (!aid || aid === "undefined") aid = id;
+      if (!aid || aid === "undefined") aid = id;
 
-    const index = await db.lPos(`${id}:accounts`, aid);
-    if (index === null) fail("unauthorized");
+      const index = await db.lPos(`${id}:accounts`, aid);
+      if (index === null) fail("unauthorized");
 
-    limit = Number.parseInt(limit);
-    offset = Number.parseInt(offset) || 0;
+      limit = Number.parseInt(limit);
+      offset = Number.parseInt(offset) || 0;
 
-    const range = !limit || received || start || end ? -1 : limit - 1;
-    const listKey = `${aid || id}:payments`;
-    let payments = (await db.lRange(listKey, 0, range)) || [];
+      const range = !limit || received || start || end ? -1 : limit - 1;
+      const listKey = `${aid || id}:payments`;
+      let payments = (await db.lRange(listKey, 0, range)) || [];
 
-    if (range === -1) {
-      const archived = (await archive.lRange(listKey, 0, -1)) || [];
-      payments = [...new Set([...payments, ...archived])];
-    } else if (limit) {
-      const needed = Math.max(0, limit + offset - payments.length);
-      if (needed > 0) {
-        const archived = (await archive.lRange(listKey, 0, limit + offset - 1)) || [];
+      if (range === -1) {
+        const archived = (await archive.lRange(listKey, 0, -1)) || [];
         payments = [...new Set([...payments, ...archived])];
+      } else if (limit) {
+        const needed = Math.max(0, limit + offset - payments.length);
+        if (needed > 0) {
+          const archived = (await archive.lRange(listKey, 0, limit + offset - 1)) || [];
+          payments = [...new Set([...payments, ...archived])];
+        }
       }
-    }
 
-    // Note: a missing payment is only logged, never removed from the list
-    // (upstream 13372a9e) — a transient lookup miss (e.g. archive-fallback
-    // lag) previously caused permanent, silent data loss when it deleted
-    // the reference from listKey.
-    const paymentKeys = payments.map((pid) => `payment:${pid}`);
-    const fetched = await gfAll(paymentKeys);
+      // Note: a missing payment is only logged, never removed from the list
+      // (upstream 13372a9e) — a transient lookup miss (e.g. archive-fallback
+      // lag) previously caused permanent, silent data loss when it deleted
+      // the reference from listKey.
+      const paymentKeys = payments.map((pid) => `payment:${pid}`);
+      const fetched = await gfAll(paymentKeys);
 
-    const validPayments: any[] = [];
+      const validPayments: any[] = [];
 
-    for (let i = 0; i < fetched.length; i++) {
-      const p = fetched[i];
-      if (!p) {
-        warn("user", id, "missing payment", payments[i]);
-        continue;
+      for (let i = 0; i < fetched.length; i++) {
+        const p = fetched[i];
+        if (!p) {
+          warn("user", id, "missing payment", payments[i]);
+          continue;
+        }
+        if (p.revertedDuplicate) continue;
+        if (received && p.amount < 0) continue;
+        if (p.created < start || p.created > end) continue;
+        validPayments.push(p);
       }
-      if (p.revertedDuplicate) continue;
-      if (received && p.amount < 0) continue;
-      if (p.created < start || p.created > end) continue;
-      validPayments.push(p);
-    }
 
-    const internalRefs = [
-      ...new Set(
-        validPayments.filter((p) => p.type === PaymentType.internal && p.ref).map((p) => p.ref),
-      ),
-    ];
+      const internalRefs = [
+        ...new Set(
+          validPayments.filter((p) => p.type === PaymentType.internal && p.ref).map((p) => p.ref),
+        ),
+      ];
 
-    if (internalRefs.length) {
-      const userKeys = internalRefs.map((ref) => `user:${ref}`);
-      const users = await gfAll(userKeys);
-      const userMap = new Map<string, any>();
-      for (let i = 0; i < internalRefs.length; i++) {
-        let u = users[i];
-        if (typeof u === "string") u = await g(`user:${u}`);
-        if (u) userMap.set(internalRefs[i], fields ? pick(u, fields) : u);
+      if (internalRefs.length) {
+        const userKeys = internalRefs.map((ref) => `user:${ref}`);
+        const users = await gfAll(userKeys);
+        const userMap = new Map<string, any>();
+        for (let i = 0; i < internalRefs.length; i++) {
+          let u = users[i];
+          if (typeof u === "string") u = await g(`user:${u}`);
+          if (u) userMap.set(internalRefs[i], fields ? pick(u, fields) : u);
+        }
+        for (const p of validPayments) {
+          if (p.type === PaymentType.internal && p.ref) p.with = userMap.get(p.ref);
+        }
       }
-      for (const p of validPayments) {
-        if (p.type === PaymentType.internal && p.ref) p.with = userMap.get(p.ref);
-      }
-    }
 
-    payments = validPayments.sort((a, b) => b.created - a.created);
+      payments = validPayments.sort((a, b) => b.created - a.created);
 
-    const fn = (a, b) => ({
-      ...a,
-      [b.currency]: {
-        tips: (a[b.currency] ? a[b.currency].tips : 0) + (b.tip || 0),
-        fiatTips: (
-          Number.parseFloat(a[b.currency] ? a[b.currency].fiatTips : 0) +
-          ((b.tip || 0) * b.rate) / SATS
-        ).toFixed(2),
-        sats:
-          (a[b.currency] ? a[b.currency].sats : 0) +
-          (b.amount || 0) +
-          (b.tip || 0) -
-          (b.fee || 0) -
-          (b.ourfee || 0),
-        fiat: (
-          Number.parseFloat(a[b.currency] ? a[b.currency].fiat : 0) +
-          (((b.amount || 0) +
-            ((b.amount > 0 ? b.tip : -b.tip) || 0) -
+      const fn = (a, b) => ({
+        ...a,
+        [b.currency]: {
+          tips: (a[b.currency] ? a[b.currency].tips : 0) + (b.tip || 0),
+          fiatTips: (
+            Number.parseFloat(a[b.currency] ? a[b.currency].fiatTips : 0) +
+            ((b.tip || 0) * b.rate) / SATS
+          ).toFixed(2),
+          sats:
+            (a[b.currency] ? a[b.currency].sats : 0) +
+            (b.amount || 0) +
+            (b.tip || 0) -
             (b.fee || 0) -
-            (b.ourfee || 0)) *
-            b.rate) /
-            SATS
-        ).toFixed(2),
-      },
-    });
+            (b.ourfee || 0),
+          fiat: (
+            Number.parseFloat(a[b.currency] ? a[b.currency].fiat : 0) +
+            (((b.amount || 0) +
+              ((b.amount > 0 ? b.tip : -b.tip) || 0) -
+              (b.fee || 0) -
+              (b.ourfee || 0)) *
+              b.rate) /
+              SATS
+          ).toFixed(2),
+        },
+      });
 
-    const incoming = payments.filter((p: any) => p.amount > 0).reduce(fn, {});
-    const outgoing = payments.filter((p: any) => p.amount < 0).reduce(fn, {});
+      const incoming = payments.filter((p: any) => p.amount > 0).reduce(fn, {});
+      const outgoing = payments.filter((p: any) => p.amount < 0).reduce(fn, {});
 
-    const { length: count } = payments;
-    if (limit) payments = payments.slice(offset, offset + limit);
+      const { length: count } = payments;
+      if (limit) payments = payments.slice(offset, offset + limit);
 
-    return c.json({ payments, count, incoming, outgoing });
+      return c.json({ payments, count, incoming, outgoing });
+    } catch (e: any) {
+      warn("problem listing payments", user?.username, e.message);
+      return bail(c, e.message);
+    }
   },
 
   async get(c) {
