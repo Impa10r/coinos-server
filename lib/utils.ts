@@ -8,6 +8,18 @@ export const fail = (msg) => {
   throw new Error(msg);
 };
 
+// Best-effort real client IP: Cloudflare's header when the request came
+// through the edge, x-forwarded-for's first hop when behind some other
+// proxy, then the raw per-request socket address index.ts attaches as
+// c.env.ip (the fallback that actually works for traffic reaching the
+// origin directly, bypassing Cloudflare — cf-connecting-ip is simply absent
+// on that traffic, not spoofed or malformed).
+export const getClientIp = (c): string | undefined =>
+  c.req.header("cf-connecting-ip") ||
+  c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ||
+  (c.env as any)?.ip ||
+  undefined;
+
 export const nada = () => {};
 
 export const sleep = (n) => new Promise((r) => setTimeout(r, n));

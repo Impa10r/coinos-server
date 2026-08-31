@@ -459,6 +459,7 @@ if (process.env.INTEGRATION) {
       nada: () => {},
       fiat: (n: number, r: number) => (n * r) / SATS,
       f: (s: any) => String(s),
+      getClientIp: () => "127.0.0.1",
       pick: (O: any, K: string[]) => K.reduce((o: any, k: string) => ((o[k] = O[k]), o), {}),
       prod: false,
       uniq: (a: any[], k: any) => [...new Map(a.map((x: any) => [k(x), x])).values()],

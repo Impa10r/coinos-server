@@ -31,7 +31,7 @@ import {
   tbFundDebit,
 } from "$lib/tb";
 import { PaymentType } from "$lib/types";
-import { SATS, bail, fail, fields, getInvoice, getPayment, getUser, pick, sats } from "$lib/utils";
+import { SATS, bail, fail, fields, getClientIp, getInvoice, getPayment, getUser, pick, sats } from "$lib/utils";
 import rpc from "@coinos/rpc";
 import { timingSafeEqual } from "crypto";
 import got from "got";
@@ -129,7 +129,7 @@ export default {
           // working) — getFundBalance() returns null iff the TigerBeetle
           // fund account hasn't been created yet.
           if (!isUuid(fund) && (await getFundBalance(fund)) === null) {
-            const ip = c.req.header("cf-connecting-ip");
+            const ip = getClientIp(c);
             err(`SECURITY: non-uuid fund name "${fund}" by ${user.username}`);
             await evictUser(user, `non-uuid fund name: ${fund}`, ip);
             fail("Invalid fund name");
@@ -626,7 +626,7 @@ export default {
         // BOTH signals agree this fund has never existed at all, so a
         // grandfathered non-UUID fund can still register its first manager.
         if (!isUuid(id) && (await getFundBalance(id)) === null) {
-          const ip = c.req.header("cf-connecting-ip");
+          const ip = getClientIp(c);
           err(`SECURITY: non-uuid fund name "${id}" by ${user.username}`);
           await evictUser(user, `non-uuid fund name: ${id}`, ip);
           fail("Invalid fund name");

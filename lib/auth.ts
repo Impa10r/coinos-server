@@ -1,6 +1,6 @@
 import config from "$config";
 import { db } from "$lib/db";
-import { fail, getUser } from "$lib/utils";
+import { fail, getClientIp, getUser } from "$lib/utils";
 import jwt from "jsonwebtoken";
 import { getCookie } from "hono/cookie";
 import net from "node:net";
@@ -127,7 +127,7 @@ export const isEvicted = async (c, user) => {
     (await db.sIsMember("evicted", user.id)) ||
     (await db.sIsMember("evicted", user.username?.toLowerCase?.().trim()));
   if (evicted) {
-    const ip = c.req.header("cf-connecting-ip");
+    const ip = getClientIp(c);
     // Distinctive, greppable line carrying the real source IP — kept even
     // though the ban below is now automatic, for visibility/search in logs.
     console.error(`EVICTED_AUTH ${user.username} ${ip}`);

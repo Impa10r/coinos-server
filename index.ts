@@ -274,7 +274,13 @@ const port: number = Number.parseInt(process.env["PORT"]) || 3119;
 Bun.serve({
   fetch(req, server) {
     if (new URL(req.url).pathname === "/ws" && server.upgrade(req)) return;
-    return app.fetch(req, server);
+    // c.env?.ip (read throughout the app as a fallback when cf-connecting-ip
+    // is missing — e.g. traffic that reaches the origin directly, bypassing
+    // Cloudflare) was always undefined: Bun's Server has no .ip property,
+    // only a requestIP(req) method, and the raw server object itself used to
+    // be passed straight through as Hono's env. Extract the real per-request
+    // socket address here instead.
+    return app.fetch(req, { ip: server.requestIP(req)?.address });
   },
   websocket,
   port,
