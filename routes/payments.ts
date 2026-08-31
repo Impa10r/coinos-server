@@ -390,44 +390,49 @@ export default {
   },
 
   async authorize(c) {
-    // Kill-switch for the fund/authorize/take mechanism (SECURITY 2026-08-25:
-    // the /take fund-claim path could pay out unbacked balance). Set redis
-    // `fund:disabled` to fail all fund authorizations closed while the
-    // mechanism is audited/rewritten.
-    if (await g("fund:disabled")) fail("Fund transfers temporarily disabled");
-
     const user = c.get("user");
-    const { id: uid } = user;
-    const body = await c.req.json();
-    const { id, fiat, currency, amount } = body;
+    try {
+      // Kill-switch for the fund/authorize/take mechanism (SECURITY 2026-08-25:
+      // the /take fund-claim path could pay out unbacked balance). Set redis
+      // `fund:disabled` to fail all fund authorizations closed while the
+      // mechanism is audited/rewritten.
+      if (await g("fund:disabled")) fail("Fund transfers temporarily disabled");
 
-    const managers = [...(await db.sMembers(`fund:${id}:managers`))];
-    if (managers.length && !managers.includes(uid)) fail("Unauthorized");
+      const { id: uid } = user;
+      const body = await c.req.json();
+      const { id, fiat, currency, amount } = body;
 
-    // The authorization's fiat/currency is the ONLY ceiling on how much a later
-    // /take can pull from the authorizer (cap = sats(fiat / rates[currency])).
-    // Reject a NaN/zero/non-finite rate or a non-positive fiat so the ceiling
-    // can never be turned into an astronomically large or non-finite value.
-    const rates = await g("rates");
-    const rate = Number(rates?.[currency]);
-    const fiatAmount = Number(fiat);
-    if (!Number.isFinite(rate) || rate <= 0) fail("Invalid currency");
-    if (!Number.isFinite(fiatAmount) || fiatAmount <= 0) fail("Invalid amount");
+      const managers = [...(await db.sMembers(`fund:${id}:managers`))];
+      if (managers.length && !managers.includes(uid)) fail("Unauthorized");
 
-    const authId = v4();
-    const authorization = {
-      authId,
-      fundId: id,
-      uid,
-      currency,
-      fiat: fiatAmount,
-      amount: Number.parseInt(amount) || 0,
-      created: Date.now(),
-    };
+      // The authorization's fiat/currency is the ONLY ceiling on how much a later
+      // /take can pull from the authorizer (cap = sats(fiat / rates[currency])).
+      // Reject a NaN/zero/non-finite rate or a non-positive fiat so the ceiling
+      // can never be turned into an astronomically large or non-finite value.
+      const rates = await g("rates");
+      const rate = Number(rates?.[currency]);
+      const fiatAmount = Number(fiat);
+      if (!Number.isFinite(rate) || rate <= 0) fail("Invalid currency");
+      if (!Number.isFinite(fiatAmount) || fiatAmount <= 0) fail("Invalid amount");
 
-    await s(`authorization:${authId}`, authorization);
-    await db.lPush(`fund:${id}:authorizations`, authId);
-    return c.json({ authId });
+      const authId = v4();
+      const authorization = {
+        authId,
+        fundId: id,
+        uid,
+        currency,
+        fiat: fiatAmount,
+        amount: Number.parseInt(amount) || 0,
+        created: Date.now(),
+      };
+
+      await s(`authorization:${authId}`, authorization);
+      await db.lPush(`fund:${id}:authorizations`, authId);
+      return c.json({ authId });
+    } catch (e: any) {
+      warn("problem authorizing fund", user?.username, e.message);
+      return bail(c, e.message);
+    }
   },
 
   async listAuthorizations(c) {
@@ -440,19 +445,24 @@ export default {
 
   async deleteAuthorization(c) {
     const user = c.get("user");
-    const id = c.req.param("id");
-    const authId = c.req.param("authId");
+    try {
+      const id = c.req.param("id");
+      const authId = c.req.param("authId");
 
-    const managers = [...(await db.sMembers(`fund:${id}:managers`))];
-    if (managers.length && !managers.includes(user.id)) fail("Unauthorized");
+      const managers = [...(await db.sMembers(`fund:${id}:managers`))];
+      if (managers.length && !managers.includes(user.id)) fail("Unauthorized");
 
-    const authorization = await g(`authorization:${authId}`);
-    if (!authorization || authorization.fundId !== id) return bail(c, "Authorization not found");
-    if (authorization.claimed) return bail(c, "Authorization already claimed");
+      const authorization = await g(`authorization:${authId}`);
+      if (!authorization || authorization.fundId !== id) return bail(c, "Authorization not found");
+      if (authorization.claimed) return bail(c, "Authorization already claimed");
 
-    await db.lRem(`fund:${id}:authorizations`, 0, authId);
-    await db.del(`authorization:${authId}`);
-    return c.json({});
+      await db.lRem(`fund:${id}:authorizations`, 0, authId);
+      await db.del(`authorization:${authId}`);
+      return c.json({});
+    } catch (e: any) {
+      warn("problem deleting fund authorization", user?.username, e.message);
+      return bail(c, e.message);
+    }
   },
 
   async take(c) {
@@ -592,43 +602,48 @@ export default {
   },
 
   async addManager(c) {
-    const body = await c.req.json();
-    const { id, username } = body;
     const user = c.get("user");
+    try {
+      const body = await c.req.json();
+      const { id, username } = body;
 
-    const k = `fund:${id}:managers`;
+      const k = `fund:${id}:managers`;
 
-    let managers: any[] = [...(await db.sMembers(k))];
-    if (managers.length) {
-      if (!managers.includes(user.id)) fail("Unauthorized");
-    } else {
-      // No managers yet usually means this call is establishing a brand-new
-      // fund (the caller becomes its founding manager) — same unguessable-id
-      // requirement as the /payments fund-creation path above. But a fund
-      // can also predate that requirement or legitimately have real balance
-      // with no manager registered yet (a "bearer" fund) — only reject when
-      // BOTH signals agree this fund has never existed at all, so a
-      // grandfathered non-UUID fund can still register its first manager.
-      if (!isUuid(id) && (await getFundBalance(id)) === null) {
-        const ip = c.req.header("cf-connecting-ip");
-        err(`SECURITY: non-uuid fund name "${id}" by ${user.username}`);
-        await evictUser(user, `non-uuid fund name: ${id}`, ip);
-        fail("Invalid fund name");
+      let managers: any[] = [...(await db.sMembers(k))];
+      if (managers.length) {
+        if (!managers.includes(user.id)) fail("Unauthorized");
+      } else {
+        // No managers yet usually means this call is establishing a brand-new
+        // fund (the caller becomes its founding manager) — same unguessable-id
+        // requirement as the /payments fund-creation path above. But a fund
+        // can also predate that requirement or legitimately have real balance
+        // with no manager registered yet (a "bearer" fund) — only reject when
+        // BOTH signals agree this fund has never existed at all, so a
+        // grandfathered non-UUID fund can still register its first manager.
+        if (!isUuid(id) && (await getFundBalance(id)) === null) {
+          const ip = c.req.header("cf-connecting-ip");
+          err(`SECURITY: non-uuid fund name "${id}" by ${user.username}`);
+          await evictUser(user, `non-uuid fund name: ${id}`, ip);
+          fail("Invalid fund name");
+        }
+        await db.sAdd(k, user.id);
       }
-      await db.sAdd(k, user.id);
+
+      const u = await getUser(username, fields);
+      if (!u) fail("User not found");
+      const { id: uid } = u;
+
+      await db.sAdd(k, uid);
+
+      const ids = [...(await db.sMembers(k))];
+      if (!managers.length)
+        managers = await Promise.all(ids.map(async (id) => await getUser(id, fields)));
+
+      return c.json(managers);
+    } catch (e: any) {
+      warn("problem adding fund manager", user?.username, e.message);
+      return bail(c, e.message);
     }
-
-    const u = await getUser(username, fields);
-    if (!u) fail("User not found");
-    const { id: uid } = u;
-
-    await db.sAdd(k, uid);
-
-    const ids = [...(await db.sMembers(k))];
-    if (!managers.length)
-      managers = await Promise.all(ids.map(async (id) => await getUser(id, fields)));
-
-    return c.json(managers);
   },
 
   async deleteManager(c) {
@@ -651,7 +666,10 @@ export default {
       managers = await Promise.all(ids.map(async (id) => await getUser(id, fields)));
 
       return c.json(managers);
-    } catch {}
+    } catch (e: any) {
+      warn("problem deleting fund manager", e.message);
+      return bail(c, e.message);
+    }
   },
 
   async confirm(c) {
