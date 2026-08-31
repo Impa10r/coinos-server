@@ -24,23 +24,40 @@ const appendCloudflareBanList = async (ip: string, reason: string) => {
   const { apiToken, accountId, bannedIpListId } = config.cloudflare || {};
   if (!apiToken || !accountId || !bannedIpListId) return;
 
+  const headers = { Authorization: `Bearer ${apiToken}` };
+  const itemsUrl = `https://api.cloudflare.com/client/v4/accounts/${accountId}/rules/lists/${bannedIpListId}/items`;
+
   try {
-    const res = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${accountId}/rules/lists/${bannedIpListId}/items`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify([{ ip, comment: reason.slice(0, 100) }]),
-      },
-    );
+    // The `cf:banned` redis set can drift from what's actually on the
+    // Cloudflare list (a redis flush/restore, or an IP added manually —
+    // e.g. the existing "goat14" entry) — read the list first so a
+    // stale/missing redis entry never produces a duplicate item on
+    // Cloudflare's side. Paginated: the Items endpoint caps each page.
+    let cursor: string | undefined;
+    do {
+      const url = new URL(itemsUrl);
+      url.searchParams.set("per_page", "1000");
+      if (cursor) url.searchParams.set("cursor", cursor);
+      const res = await fetch(url, { headers });
+      const data = (await res.json().catch(() => ({}))) as any;
+      if (!data.success) {
+        console.error("cloudflare ban-list read failed", JSON.stringify(data.errors));
+        return; // unknown list state — don't risk a duplicate append
+      }
+      if ((data.result || []).some((item: any) => item.ip === ip)) return; // already listed
+      cursor = data.result_info?.cursors?.after;
+    } while (cursor);
+
+    const res = await fetch(itemsUrl, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify([{ ip, comment: reason.slice(0, 100) }]),
+    });
     const data = (await res.json().catch(() => ({}))) as any;
     if (!data.success)
       console.error("cloudflare ban-list append failed", ip, JSON.stringify(data.errors));
   } catch (e: any) {
-    console.error("cloudflare ban-list append request failed", ip, e.message);
+    console.error("cloudflare ban-list request failed", ip, e.message);
   }
 };
 
