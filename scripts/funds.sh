@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Display all funds with non-zero balances.
+# Display all funds with non-zero balances, and each fund's founder (the
+# account that made its earliest funding payment).
 # Usage: ./scripts/funds.sh
 
 set -euo pipefail
@@ -39,6 +40,7 @@ print(json.dumps(names))
 
 docker exec app bun -e "
   const { createClient } = require('tigerbeetle-node');
+  const { createClient: createRedisClient } = require('redis');
   const { lookup } = require('node:dns/promises');
   const { createHash } = require('crypto');
 
@@ -54,32 +56,61 @@ docker exec app bun -e "
     const { address: ip } = await lookup('tb');
     const c = createClient({ cluster_id: 0n, replica_addresses: [\`\${ip}:3000\`] });
 
+    const pass = process.env.DB_PASSWORD;
+    const db  = createRedisClient({ url: 'redis://:' + pass + '@db' });
+    const arc = createRedisClient({ url: 'redis://:' + pass + '@arc:6380' });
+    await Promise.all([db.connect(), arc.connect()]);
+
+    const get = async (key) => {
+      const v = await db.get(key) ?? await arc.get(key);
+      return v ? JSON.parse(v) : null;
+    };
+
+    // Founder = uid of the fund's earliest funding payment (type 'fund',
+    // negative amount — a debit into the fund, per debit()'s record shape).
+    async function founderOf(name) {
+      const pids = await db.lRange('fund:' + name + ':payments', 0, -1);
+      let earliest = null;
+      for (const pid of pids) {
+        const p = await get('payment:' + pid);
+        if (!p || p.type !== 'fund' || !(p.amount < 0)) continue;
+        if (!earliest || p.created < earliest.created) earliest = p;
+      }
+      if (!earliest?.uid) return null;
+      const u = await get('user:' + earliest.uid);
+      return u?.username ?? null;
+    }
+
     const names = ${NAMES_JSON};
     const ids = names.map(fundAccountId);
 
     const accounts = await c.lookupAccounts(ids);
     const byId = new Map(accounts.map(a => [a.id.toString(), a]));
 
-    const results = names
-      .map((name, i) => {
-        const a = byId.get(ids[i].toString());
-        if (!a) return null;
-        const micro = a.credits_posted - a.debits_posted;
-        const sats = Number(micro / MSATS);
-        return { name, sats };
-      })
-      .filter(r => r && r.sats > 0)
-      .sort((a, b) => b.sats - a.sats);
+    const results = [];
+    for (let i = 0; i < names.length; i++) {
+      const name = names[i];
+      const a = byId.get(ids[i].toString());
+      if (!a) continue;
+      const micro = a.credits_posted - a.debits_posted;
+      const sats = Number(micro / MSATS);
+      if (sats <= 0) continue;
+      const founder = await founderOf(name);
+      results.push({ name, sats, founder });
+    }
+    results.sort((a, b) => b.sats - a.sats);
 
     if (results.length === 0) {
       console.log('All funds are empty.');
     } else {
-      const pad = Math.max(...results.map(r => r.name.length));
-      for (const { name, sats } of results) {
-        console.log(name.padEnd(pad) + '  ' + sats.toLocaleString() + ' sats');
+      const namePad = Math.max(...results.map(r => r.name.length));
+      const founderPad = Math.max(7, ...results.map(r => (r.founder || '(unknown)').length));
+      for (const { name, sats, founder } of results) {
+        console.log(name.padEnd(namePad) + '  ' + (founder || '(unknown)').padEnd(founderPad) + '  ' + sats.toLocaleString() + ' sats');
       }
     }
 
     c.destroy();
+    await Promise.all([db.quit(), arc.quit()]);
   })();
 " 2>/dev/null
