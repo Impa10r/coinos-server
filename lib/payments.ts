@@ -45,7 +45,12 @@ const outLn = {
       l("cln: paid", args.invstring?.slice(-8));
       return r;
     } catch (e: any) {
-      warn("cln: failed", args.invstring?.slice(-8), e.message);
+      // Info, not warn: a single xpay attempt failing (a route's
+      // fee_insufficient after CLN's own retries, a timeout) is routine —
+      // the fallback below (or the caller's own listpays-based verification)
+      // is what actually determines whether the payment needs attention, so
+      // this first-attempt failure doesn't warrant a warn-level report entry.
+      l("cln: failed", args.invstring?.slice(-8), e.message);
       if (!noFallback && lnd && !e.message?.includes("already underway")) {
         l("lnd: paying", args.invstring?.slice(-8), args.amount_msat, "maxfee", args.maxfee);
         try {
