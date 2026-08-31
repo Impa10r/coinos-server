@@ -60,6 +60,20 @@ const banIp = async (ip: string, reason: string) => {
 // Unlike the `blacklist` freeze (which only blocks sends), this kills the
 // value of a compromised/attacker credential outright. Match on the
 // immutable uid OR username so a rename can't shake it.
+// Auto-eviction: called from abuse-detection points elsewhere in the app
+// (e.g. attempting to create a fund under a non-UUID name) to hard-kill an
+// account the instant it's caught, without waiting for manual admin action.
+// Adds to the same `evicted` set isEvicted() checks, so the account is dead
+// starting with its very next request. Also bans the current IP immediately
+// — via the same Cloudflare Rulesets call isEvicted() uses — rather than
+// waiting on that next request to trip isEvicted()'s own ban.
+export const evictUser = async (user: any, reason: string, ip?: string) => {
+  if (!user?.id) return;
+  await db.sAdd("evicted", user.id);
+  console.error(`AUTO_EVICT ${user.username} ${reason} ${ip ?? ""}`);
+  if (ip) void banIp(ip, reason);
+};
+
 export const isEvicted = async (c, user) => {
   if (!user) return false;
   const evicted =

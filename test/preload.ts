@@ -357,6 +357,8 @@ if (process.env.INTEGRATION) {
     auth: (_r: any, _s: any, n: any) => n(),
     optional: (_r: any, _s: any, n: any) => n(),
     admin: (_r: any, _s: any, n: any) => n(),
+    isEvicted: async () => false,
+    evictUser: async () => {},
   }));
   mock.module("$lib/invoices", () => ({
     generate: mock(async ({ invoice, user }: any) => ({

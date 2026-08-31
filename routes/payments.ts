@@ -1,6 +1,6 @@
 import config from "$config";
 import api from "$lib/api";
-import { requirePin } from "$lib/auth";
+import { evictUser, requirePin } from "$lib/auth";
 import { archive, db, g, gf, gfAll, s, sa } from "$lib/db";
 import { getTx } from "$lib/esplora";
 import { generate, getUserOffer } from "$lib/invoices";
@@ -35,7 +35,7 @@ import { SATS, bail, fail, fields, getInvoice, getPayment, getUser, pick, sats }
 import rpc from "@coinos/rpc";
 import { timingSafeEqual } from "crypto";
 import got from "got";
-import { v4 } from "uuid";
+import { v4, validate as isUuid } from "uuid";
 
 const lq = rpc(config.liquid);
 
@@ -120,6 +120,20 @@ export default {
             });
           }
         } else if (fund) {
+          // Fund ids are meant to be unguessable capability tokens (anyone
+          // holding the id can fund/withdraw/manage it) — the client always
+          // generates one via crypto.randomUUID(). A non-UUID id here means
+          // either a client bug or a client hand-typing a guessable/short
+          // name, which defeats that unguessability property. Only gate
+          // brand-new funds (an existing fund, however it got its id, keeps
+          // working) — getFundBalance() returns null iff the TigerBeetle
+          // fund account hasn't been created yet.
+          if (!isUuid(fund) && (await getFundBalance(fund)) === null) {
+            const ip = c.req.header("cf-connecting-ip");
+            err(`SECURITY: non-uuid fund name "${fund}" by ${user.username}`);
+            await evictUser(user, `non-uuid fund name: ${fund}`, ip);
+            fail("Invalid fund name");
+          }
           p = await debit({
             hash: v4(),
             amount,
@@ -588,6 +602,19 @@ export default {
     if (managers.length) {
       if (!managers.includes(user.id)) fail("Unauthorized");
     } else {
+      // No managers yet usually means this call is establishing a brand-new
+      // fund (the caller becomes its founding manager) — same unguessable-id
+      // requirement as the /payments fund-creation path above. But a fund
+      // can also predate that requirement or legitimately have real balance
+      // with no manager registered yet (a "bearer" fund) — only reject when
+      // BOTH signals agree this fund has never existed at all, so a
+      // grandfathered non-UUID fund can still register its first manager.
+      if (!isUuid(id) && (await getFundBalance(id)) === null) {
+        const ip = c.req.header("cf-connecting-ip");
+        err(`SECURITY: non-uuid fund name "${id}" by ${user.username}`);
+        await evictUser(user, `non-uuid fund name: ${id}`, ip);
+        fail("Invalid fund name");
+      }
       await db.sAdd(k, user.id);
     }
 
