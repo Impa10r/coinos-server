@@ -247,6 +247,13 @@ export default {
       const user = await getNostrUser(key);
       return c.json(pick(user, fields));
     } catch (e) {
+      // A lookup for a name nobody has is the caller's business, not a server
+      // fault: 404, logged at info. It fires constantly from stray client
+      // routes and username probing, and a 500 here misreports it as ours.
+      if (e.message === "User not found") {
+        l("user lookup miss", key);
+        return c.json(e.message, 404);
+      }
       err("problem getting user", key, e.message);
       return c.json(e.message, 500);
     }
