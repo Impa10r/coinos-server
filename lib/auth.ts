@@ -1,6 +1,6 @@
 import config from "$config";
 import { db } from "$lib/db";
-import { banKey, fail, getClientIp, getUser } from "$lib/utils";
+import { banKey, fail, getClientIp, getPayment, getUser } from "$lib/utils";
 import jwt from "jsonwebtoken";
 import { getCookie } from "hono/cookie";
 
@@ -125,12 +125,88 @@ export const disableFoundedFunds = async (uid: string) => {
   }
 };
 
-export const evictUser = async (user: any, reason: string, ip?: string) => {
+// The eviction itself, with no cascade. cascadeFundPayouts() below calls this
+// rather than evictUser() so an automatic eviction can never trigger another
+// round of automatic evictions — depth is capped at one structurally.
+const evictAccount = async (user: any, reason: string, ip?: string) => {
   if (!user?.id) return;
-  await Promise.all([db.sAdd("evicted", user.id), db.sAdd("blacklist", user.id)]);
+  const username = user.username?.toLowerCase?.().trim();
+  // Both the uid AND the username. changeid() rekeys an account to a fresh
+  // uid while KEEPING its username (see lib/changeid.ts), so a uid-only entry
+  // is silently shed if that account is ever rekeyed — by the blocked-address
+  // handler in lib/payments.ts, or by hand. isEvicted() and debit()'s
+  // blacklist check both already match on either.
+  const entries = [user.id, username].filter(Boolean);
+  await Promise.all([db.sAdd("evicted", entries), db.sAdd("blacklist", entries)]);
   console.error(`AUTO_EVICT ${user.username} ${reason} ${ip ?? ""}`);
   if (ip) void banIp(ip, reason);
   void disableFoundedFunds(user.id);
+};
+
+// When an account is evicted, everyone it paid out of its own funds is
+// suspect — that's the money-mule pattern (a fund is drained to accomplice
+// accounts, which then withdraw). This is the inline form of
+// scripts/evict-fund-payout-recipients.ts, scoped to just this account's
+// funds (user:<uid>:funds, populated for any funder) rather than the script's
+// full keyspace scan, so it's cheap enough to run on eviction.
+//
+// GRIEFING RISK, and why this is advisory by default: the trigger is
+// "received money from a fund", which the *sender* chooses. Someone who
+// worked out that this rule exists could pay gift-link payouts to innocent
+// accounts specifically to get them auto-evicted. Whitelisted accounts are
+// exempt, but that only covers ops. So this logs its verdict and does nothing
+// until you opt in:
+//
+//   SET evict:cascade 1     (act)     DEL evict:cascade   (advisory again)
+//
+// Run the script by hand for the full cross-fund sweep either way; it also
+// covers funds this account manages but never funded.
+const cascadeFundPayouts = async (user: any, reason: string) => {
+  try {
+    const fundIds = [...(await db.sMembers(`user:${user.id}:funds`))].map(String);
+    if (!fundIds.length) return;
+
+    const recipients = new Map<string, Set<string>>();
+    for (const fundId of fundIds) {
+      const pids = (await db.lRange(`fund:${fundId}:payments`, 0, -1)) || [];
+      for (const pid of pids) {
+        // A payout FROM the fund, matching take()'s
+        // credit({ aid: user.id, ref: id, type: "fund" }).
+        const p: any = await getPayment(String(pid));
+        if (!p || p.type !== "fund" || p.ref !== fundId || !(p.amount > 0)) continue;
+        const uid = p.aid || p.uid;
+        if (!uid || uid === user.id) continue;
+        if (!recipients.has(uid)) recipients.set(uid, new Set());
+        recipients.get(uid)!.add(fundId);
+      }
+    }
+    if (!recipients.size) return;
+
+    const act = !!(await db.get("evict:cascade"));
+    for (const [uid, funds] of recipients) {
+      if (await db.sIsMember("evicted", uid)) continue;
+      const recipient = await getUser(uid);
+      if (!recipient) continue;
+      const name = recipient.username?.toLowerCase?.().trim();
+      if (name && (await db.sIsMember("whitelist", name))) continue;
+      // Check the username too: entries predating evictAccount's dual write,
+      // and anything an admin added by hand, are username-only. Without this
+      // an already-evicted account gets re-evicted on every pass — harmless
+      // but it re-logs AUTO_EVICT and re-runs disableFoundedFunds each time.
+      if (name && (await db.sIsMember("evicted", name))) continue;
+
+      const why = `paid from fund(s) ${[...funds].join(",")} of evicted ${user.username} (${reason})`;
+      if (act) await evictAccount(recipient, why);
+      else console.error(`EVICT_CANDIDATE ${recipient.username} ${why}`);
+    }
+  } catch (e: any) {
+    console.error("cascadeFundPayouts failed", user?.id, e.message);
+  }
+};
+
+export const evictUser = async (user: any, reason: string, ip?: string) => {
+  await evictAccount(user, reason, ip);
+  void cascadeFundPayouts(user, reason);
 };
 
 export const isEvicted = async (c, user) => {
