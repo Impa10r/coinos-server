@@ -244,7 +244,10 @@ export default () => {
             EX: 2 * nwcEventMaxAgeSeconds,
           }))
         ) {
-          warn("nwc event already handled", ev.id.slice(0, 8));
+          // Info, not warn: the same event arriving twice is the normal cost
+          // of subscribing to several relays, and the SET NX above already
+          // handled it correctly. Nothing here is actionable.
+          l("nwc event already handled", ev.id.slice(0, 8));
           return;
         }
 
