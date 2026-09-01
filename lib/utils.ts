@@ -60,7 +60,41 @@ const expandIPv6 = (ip: string): string[] | null => {
 // one subscriber the /128 belonged to.
 //
 // Returns null for anything that isn't a parseable IP, so callers can skip.
+// Addresses that identify shared infrastructure rather than one remote
+// client: loopback, RFC1918, CGNAT/Tailscale, link-local, and IPv6 ULA.
+//
+// Banning one of these is never right and is actively dangerous. Traffic that
+// reaches the origin over a tunnel or a local proxy — the FIPS overlay comes
+// in over WireGuard, so every FIPS client shares one tunnel address — has the
+// SHARED address as its source. Ban it because one account behind it was
+// evicted and you've cut off everyone else behind it too. getClientIp()'s
+// c.env.ip fallback makes that reachable from the eviction path, so the guard
+// belongs here, at the one chokepoint both the recorder (banIp) and the
+// enforcer (lib/app.ts) go through.
+//
+// The cost is that clients arriving this way aren't IP-bannable at all, which
+// is honest: they aren't distinguishable by IP at this layer. Eviction still
+// stops the account, since that keys on uid.
+const isSharedInfra = (ip: string): boolean => {
+  if (net.isIPv4(ip)) {
+    const [a, b] = ip.split(".").map(Number);
+    return (
+      a === 0 ||
+      a === 10 ||
+      a === 127 ||
+      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168)
+    );
+  }
+  const first = Number.parseInt(expandIPv6(ip)?.[0] ?? "", 16);
+  if (Number.isNaN(first)) return false;
+  return (first >= 0xfc00 && first <= 0xfdff) || (first >= 0xfe80 && first <= 0xfebf);
+};
+
 export const banKey = (ip: string): string | null => {
+  if (isSharedInfra(ip)) return null;
   if (net.isIPv4(ip)) return ip;
   if (!net.isIPv6(ip)) return null;
 
@@ -68,8 +102,12 @@ export const banKey = (ip: string): string | null => {
   // for an IPv4 client) is an IPv4 client, not an IPv6 one. Taking its /64
   // would yield ::/64, which contains EVERY IPv4-mapped address — one ban
   // would lock out all IPv4 traffic. Ban the real address instead.
+  // Re-check the unwrapped address against isSharedInfra: ::ffff:10.0.0.1 is
+  // a private address wearing an IPv6 costume, and the check above only saw
+  // the wrapper.
   const mapped = ip.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i);
-  if (mapped) return net.isIPv4(mapped[1]) ? mapped[1] : null;
+  if (mapped)
+    return net.isIPv4(mapped[1]) && !isSharedInfra(mapped[1]) ? mapped[1] : null;
 
   const groups = expandIPv6(ip);
   if (!groups) return null;
