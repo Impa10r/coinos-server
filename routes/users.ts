@@ -375,6 +375,7 @@ export default {
         user.pin = newpin;
       if (user.pin === "delete") user.pin = undefined;
 
+      let staleUsernameKey: string | undefined;
       if (username) {
         const currentUsername = user.username.replace(/\s/g, "").toLowerCase();
         if (username !== currentUsername) {
@@ -385,7 +386,13 @@ export default {
             fail("Username taken");
           } else {
             l("changing username", currentUsername, username);
-            await db.del(`user:${currentUsername}`);
+            // Retire the OLD pointer only after the new one is durably written
+            // (below). Deleting it up here orphaned the account whenever
+            // anything in between threw — the handler's catch just bails, so
+            // `user:<name>` was gone while the record still carried that name:
+            // unreachable by username, can't log in, `uid <name>` returns
+            // nothing. Worst case now is a stale extra pointer to the same uid.
+            staleUsernameKey = `user:${currentUsername}`;
             user.username = username;
           }
         }
@@ -456,6 +463,7 @@ export default {
       await s(`user:${user.username.toLowerCase().replace(/\s/g, "")}`, user.id);
 
       await s(`user:${user.id}`, user);
+      if (staleUsernameKey) await db.del(staleUsernameKey);
       if (user.nip5) await db.sAdd("nip5", `${user.username}:${user.pubkey}`);
 
       if (typeof body.bip353 !== "undefined") {
