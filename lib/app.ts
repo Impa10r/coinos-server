@@ -1,5 +1,6 @@
 import config from "$config";
 import { db } from "$lib/db";
+import { banKey } from "$lib/utils";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
@@ -21,7 +22,16 @@ const resLogger = pino((pino as any).destination("res"));
 // takes effect the instant an IP is added to the set.
 app.use("*", async (c, next) => {
   const ip = c.req.header("cf-connecting-ip");
-  if (ip && (await db.sIsMember("cf:banned", ip))) return c.text("Forbidden", 403);
+  if (ip) {
+    // Match on the same unit banIp() stores — the /64 for IPv6, the address
+    // itself for IPv4 — plus the raw address, since entries banned before
+    // that normalization existed are still in the set as full /128s. One
+    // round trip either way.
+    const key = banKey(ip);
+    const members = key && key !== ip ? [key, ip] : [key ?? ip];
+    const hits = (await db.sMIsMember("cf:banned", members)) as unknown as boolean[];
+    if (hits.some(Boolean)) return c.text("Forbidden", 403);
+  }
   await next();
 });
 

@@ -1,6 +1,7 @@
 import config from "$config";
 import { g, gf } from "$lib/db";
 import locales from "$lib/locales/index";
+import net from "node:net";
 
 const { URL } = process.env;
 
@@ -19,6 +20,68 @@ export const getClientIp = (c): string | undefined =>
   c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ||
   (c.env as any)?.ip ||
   undefined;
+
+// Expand any legal IPv6 textual form (compressed `::`, embedded IPv4 tail,
+// zone id) to its 8 hextets, lowercased with leading zeros stripped.
+const expandIPv6 = (ip: string): string[] | null => {
+  let s = ip.split("%")[0];
+
+  const v4 = s.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  if (v4) {
+    const o = v4[1].split(".").map(Number);
+    if (o.some((n) => n > 255)) return null;
+    s = `${s.slice(0, -v4[1].length)}${((o[0] << 8) | o[1]).toString(16)}:${(
+      (o[2] << 8) |
+      o[3]
+    ).toString(16)}`;
+  }
+
+  const parts = s.split("::");
+  if (parts.length > 2) return null;
+  const head = parts[0] ? parts[0].split(":").filter(Boolean) : [];
+  const tail = parts.length === 2 ? (parts[1] ? parts[1].split(":").filter(Boolean) : []) : null;
+
+  const groups =
+    tail === null ? head : [...head, ...Array(8 - head.length - tail.length).fill("0"), ...tail];
+
+  if (groups.length !== 8) return null;
+  return groups.map((h) => h.replace(/^0+(?=.)/, "").toLowerCase());
+};
+
+// Normalize a source IP to the unit we actually ban.
+//
+// IPv4 bans the single address. IPv6 bans the /64: a residential IPv6 client
+// rotates its address WITHIN its own /64 constantly (RFC 4941 privacy
+// extensions — typically at least daily, often per outbound connection), so a
+// /128 ban stops roughly one request and the same household is straight back
+// on a fresh unbanned address, while `cf:banned` fills with dead one-shot
+// entries. A /64 is a single end site by design (RFC 6177 — subscribers get a
+// /64 at minimum, usually /56 or /48), so banning it doesn't reach past the
+// one subscriber the /128 belonged to.
+//
+// Returns null for anything that isn't a parseable IP, so callers can skip.
+export const banKey = (ip: string): string | null => {
+  if (net.isIPv4(ip)) return ip;
+  if (!net.isIPv6(ip)) return null;
+
+  // An IPv4-mapped address (::ffff:1.2.3.4 — what a dual-stack socket reports
+  // for an IPv4 client) is an IPv4 client, not an IPv6 one. Taking its /64
+  // would yield ::/64, which contains EVERY IPv4-mapped address — one ban
+  // would lock out all IPv4 traffic. Ban the real address instead.
+  const mapped = ip.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i);
+  if (mapped) return net.isIPv4(mapped[1]) ? mapped[1] : null;
+
+  const groups = expandIPv6(ip);
+  if (!groups) return null;
+
+  const prefix = groups.slice(0, 4);
+  // All-zero prefix is ::/64 — loopback, unspecified, and the mapped range.
+  // Never bannable; refuse rather than blackhole them.
+  if (prefix.every((h) => h === "0")) return null;
+
+  while (prefix.length > 1 && prefix[prefix.length - 1] === "0") prefix.pop();
+  return `${prefix.join(":")}::/64`;
+};
 
 export const nada = () => {};
 

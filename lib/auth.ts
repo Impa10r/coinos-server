@@ -1,9 +1,8 @@
 import config from "$config";
 import { db } from "$lib/db";
-import { fail, getClientIp, getUser } from "$lib/utils";
+import { banKey, fail, getClientIp, getUser } from "$lib/utils";
 import jwt from "jsonwebtoken";
 import { getCookie } from "hono/cookie";
-import net from "node:net";
 
 const extractToken = (c) => {
   const authHeader = c.req.header("authorization");
@@ -59,15 +58,19 @@ const appendCloudflareBanList = async (ip: string, reason: string) => {
 // credentials or keep probing. Fire-and-forget and fully best-effort: must
 // never add latency to, or fail, the actual auth check.
 const banIp = async (ip: string, reason: string) => {
-  if (!net.isIP(ip)) return;
+  // What lands in the set is the /64 for IPv6, the address itself for IPv4 —
+  // see banKey(). lib/app.ts's enforcement middleware normalizes the incoming
+  // IP the same way, so the two always agree.
+  const key = banKey(ip);
+  if (!key) return;
 
-  // SADD returns 1 only when the IP is newly added — skip the Cloudflare
-  // round-trip entirely on a repeat hit from an already-banned IP.
-  const added = await db.sAdd("cf:banned", ip);
+  // SADD returns 1 only when the entry is newly added — skip the Cloudflare
+  // round-trip entirely on a repeat hit from an already-banned source.
+  const added = await db.sAdd("cf:banned", key);
   if (!added) return;
-  console.error(`IP_BANNED ${ip} ${reason}`);
+  console.error(`IP_BANNED ${key} ${reason}`);
 
-  void appendCloudflareBanList(ip, reason);
+  void appendCloudflareBanList(key, reason);
 };
 
 // Hard eviction: an account in the `evicted` set cannot authenticate AT ALL —
@@ -113,7 +116,10 @@ export const disableFoundedFunds = async (uid: string) => {
         Promise.all([db.set(`fund:${id}:disabled`, "1"), db.del(`fund:${id}:managers`)]),
       ),
     );
-    console.error(`DISABLED_FUNDS ${uid} ${fundIds.join(",")}`);
+    // Deliberately unlogged: this re-runs on EVERY request an evicted account
+    // makes (it doubles as a backfill for manually-evicted accounts), so a log
+    // line here just repeats forever while the account keeps probing. The
+    // eviction itself is already logged by EVICTED_AUTH / AUTO_EVICT.
   } catch (e: any) {
     console.error("disableFoundedFunds failed", uid, e.message);
   }
