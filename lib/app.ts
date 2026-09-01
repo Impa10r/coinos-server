@@ -27,10 +27,21 @@ app.use("*", async (c, next) => {
     // itself for IPv4 — plus the raw address, since entries banned before
     // that normalization existed are still in the set as full /128s. One
     // round trip either way.
-    const key = banKey(ip);
-    const members = key && key !== ip ? [key, ip] : [key ?? ip];
-    const hits = (await db.sMIsMember("cf:banned", members)) as unknown as boolean[];
-    if (hits.some(Boolean)) return c.text("Forbidden", 403);
+    //
+    // Fail OPEN on any error. This middleware runs before everything, so a
+    // throw here 500s every request on the server; letting traffic through
+    // while the ban lookup is broken is strictly better than a total outage,
+    // and the eviction check in lib/auth.ts still blocks the account itself.
+    try {
+      const key = banKey(ip);
+      const members = key && key !== ip ? [key, ip] : [key ?? ip];
+      // Replies as an array of 0/1 per member — this command has no boolean
+      // transform, so don't type it as boolean[].
+      const hits = (await db.smIsMember("cf:banned", members)) as unknown as number[];
+      if (hits.some((n) => Number(n) === 1)) return c.text("Forbidden", 403);
+    } catch (e: any) {
+      console.error("ban check failed", ip, e.message);
+    }
   }
   await next();
 });
