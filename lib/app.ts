@@ -80,8 +80,13 @@ if (prod) {
 
     const ip = (c.req.header("cf-connecting-ip") as string) || (c.env as any)?.ip || "unknown";
     const ua = c.req.header("user-agent") || "unknown-ua";
-    const rateLimitBy = c.req.header("rate-limit-by");
-    const key = rateLimitBy === "ua" ? ua : ip;
+    // Always key on IP. This used to switch to the user-agent whenever the
+    // caller sent `rate-limit-by: ua`, which handed every client an opt-out:
+    // send that header, rotate the UA per request, and each request lands in
+    // a fresh bucket — the general limit stopped applying at all. Nothing in
+    // the UI sends the header. The strict limit below was never exposed to
+    // this (it keys on uid, or ip+ua together).
+    const key = ip;
     const now = Date.now();
 
     // General rate limit: 2000 req / 2s

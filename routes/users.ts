@@ -29,7 +29,7 @@ import {
 import register from "$lib/register";
 import { emit } from "$lib/sockets";
 import upload from "$lib/upload";
-import { bail, fail, fields, getUser, pick, prod } from "$lib/utils";
+import { bail, fail, fields, getClientIp, getUser, pick, prod } from "$lib/utils";
 import whitelist from "$lib/whitelist";
 import rpc from "@coinos/rpc";
 import { $ } from "bun";
@@ -248,9 +248,29 @@ export default {
       return c.json(pick(user, fields));
     } catch (e) {
       // A lookup for a name nobody has is the caller's business, not a server
-      // fault: 404, logged at info. It fires constantly from stray client
-      // routes and username probing, and a 500 here misreports it as ours.
+      // fault: 404, logged at info. A 500 here misreported it as ours.
       if (e.message === "User not found") {
+        // This endpoint is unauthenticated and answers "does this name exist"
+        // for any key, so it's the natural target for username enumeration.
+        // Throttle MISSES per IP rather than requests: legitimate traffic
+        // resolves names that exist, a scanner is almost entirely misses.
+        //
+        // Only username-shaped keys count. A nostr pubkey that no relay has a
+        // profile for is a legitimate bulk miss — the firehose fetches a
+        // profile per event author — so counting those would 429 real users.
+        const scannable = !/^[0-9a-f]{64}$/i.test(key) && !key.startsWith("npub") && !key.startsWith("nprofile");
+        const ip = scannable ? getClientIp(c) : undefined;
+        if (ip) {
+          const missKey = `ip:${ip}:usermiss`;
+          const misses = Number(await db.incr(missKey));
+          if (misses === 1) await db.expire(missKey, 60);
+          if (prod && misses > 30) {
+            // Once per window, not per request — past the threshold this is a
+            // tight loop and the log would be the bigger problem.
+            if (misses === 31) warn("user enumeration throttled", ip, key);
+            return c.json("Too Many Requests", 429);
+          }
+        }
         l("user lookup miss", key);
         return c.json(e.message, 404);
       }
