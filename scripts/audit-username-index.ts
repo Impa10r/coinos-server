@@ -52,7 +52,13 @@ for await (const key of scan("user:*")) {
   }
 
   const name = norm(String(user.username));
-  const pointer = await db.get(`user:${name}`);
+  // Read through g(), not db.get: the two writers disagree on encoding.
+  // register.ts writes the pointer raw (`db.set(user:<name>, id)`), the
+  // profile-update path writes it JSON-encoded (`s()`, so `"<id>"` with
+  // quotes). Both read back fine through g(), which JSON.parses and falls
+  // back to the raw string — a raw db.get comparison reports every
+  // JSON-encoded pointer as a conflict.
+  const pointer = await g(`user:${name}`);
 
   if (pointer === uid) continue;
 
