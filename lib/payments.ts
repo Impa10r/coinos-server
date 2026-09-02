@@ -36,6 +36,44 @@ const isWithdrawLocked = (type: string): string | null => {
 
 const inFlight = new Set<string>();
 
+// A rejected xpay() is NOT evidence that CLN is finished with an invoice.
+// xpay splits into parts, and "Timed out after N attempts" means CLN stopped
+// RETRYING — not that its HTLCs resolved. Paying via LND while a CLN part is
+// still in flight pays the invoice twice.
+//
+// Confirmed in production on 397d8714…: xpay split 43,000 into 42,011 + 989,
+// failed the 989 part twelve times, and reported failure at t=222 while the
+// 42,011 part had been pending since t=163. LND then paid the full 43,000 at
+// t=225, the recipient learned the preimage and settled BOTH — 85,011 sats
+// delivered on a 43,000 sat invoice, with only the LND leg reaching the
+// ledger, so the ~42,161 sat overspend came straight out of the hot wallet.
+//
+// Fall back only when every CLN part has definitively failed. Anything else —
+// a pending part, an already-complete part, or an RPC error leaving the state
+// unknown — declines the fallback so the caller's existing listpays
+// verification takes over: it finalizes a payment that completed, and leaves a
+// pending one in `pending` for check() to resolve. Neither wants a second
+// payment attempt. No CLN record at all means nothing is in flight (xpay threw
+// before creating any sendpay), which is the one safe case to retry.
+const clnPartsAllFailed = async (bolt11: string): Promise<boolean> => {
+  try {
+    // Per-part view: unambiguous, and the only place a single pending part
+    // among a dozen failed ones is visible.
+    const { payments } = (await ln.listsendpays({ bolt11 })) as any;
+    if (payments?.some((p: any) => p.status !== "failed")) return false;
+
+    // Cross-check the aggregate view before trusting an EMPTY per-part
+    // result. "No records" and "the bolt11 filter matched nothing" look
+    // identical here, and the second would silently re-enable the double
+    // payment, so an empty listsendpays only counts when listpays agrees.
+    const { pays } = (await ln.listpays(bolt11)) as any;
+    return !pays?.some((p: any) => p.status !== "failed");
+  } catch (e: any) {
+    warn("cln payment-state check failed, declining lnd fallback", bolt11?.slice(-8), e.message);
+    return false;
+  }
+};
+
 const outLn = {
   async xpay(args: any, { noFallback = false } = {}) {
     l("cln: paying", args.invstring?.slice(-8), args.amount_msat, "maxfee", args.maxfee);
@@ -52,6 +90,12 @@ const outLn = {
       // this first-attempt failure doesn't warrant a warn-level report entry.
       l("cln: failed", args.invstring?.slice(-8), e.message);
       if (!noFallback && lnd && !e.message?.includes("already underway")) {
+        // See clnPartsAllFailed above — falling back over a still-in-flight
+        // CLN part is how an invoice gets paid twice.
+        if (!(await clnPartsAllFailed(args.invstring))) {
+          warn("cln parts unresolved, declining lnd fallback", args.invstring?.slice(-8));
+          throw e;
+        }
         l("lnd: paying", args.invstring?.slice(-8), args.amount_msat, "maxfee", args.maxfee);
         try {
           const r = await lnd.payinvoice({ ...args, retry_for: 60 });
