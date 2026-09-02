@@ -34,6 +34,14 @@ rsync -az --delete "${BASE}/archive-kv/" "${DEST}/archive-kv/"
 rsync -az --delete --exclude=cln.log --exclude=.gossip_store\
   "${BASE}/lightning/" "${DEST}/lightning/" 2>/dev/null || true
 
+# --- CLN: hsm_secret separately for upload 
+rsync -az 
+  "${BASE}/lightning/bitcoin/hsm_secret" "${BACKUP_HOST}:${TARGET_HOME}/hsm_secret" 2>/dev/null || true
+
 # --- LND: full directory, preserving structure ---
 rsync -az --delete --exclude=chan-backup-archives --exclude=logs \
   "${HOME}/.lnd/" "${DEST}/lnd/" 2>/dev/null || true
+
+# --- LND: channel backup separately for upload
+rsync -az \
+  "${HOME}/data/chain/bitcoin/mainnet/channel.backup" "${BACKUP_HOST}:${TARGET_HOME}/channel.backup" 2>/dev/null || true
