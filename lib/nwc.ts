@@ -358,7 +358,14 @@ export default () => {
         try {
           const app = await g(`app:${pubkey}`);
           if (!app) {
-            warn("nwc app not found for pubkey", pubkey.slice(0, 8));
+            // Info, not warn: a revoked or deleted connection whose client
+            // hasn't been reconfigured keeps polling on its own schedule,
+            // forever. Nothing is actionable — the app record is gone, so
+            // there's nothing left to identify or clean up, and the fail()
+            // below already answers correctly. The outer catch deliberately
+            // exempts "pubkey not found" from err() for the same reason; this
+            // line ran before the throw, so that exemption never covered it.
+            l("nwc app not found for pubkey", pubkey.slice(0, 8));
             fail("pubkey not found");
           }
           const user = await g(`user:${app.uid}`);
