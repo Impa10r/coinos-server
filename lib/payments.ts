@@ -1439,20 +1439,39 @@ export const sendLightning = async ({
   // attempt's debit — check() never sees it again and the user is never
   // refunded. Make the retry wait until reconciliation clears the entry
   // (seconds to ~a minute).
-  if (await db.sIsMember("pending", pr))
+  //
+  // SADD returns 1 only on a genuine insert, so claiming the invoice here is a
+  // single atomic check-and-set. This used to read the set here and write it
+  // after debit(), with the three listpays checks above offering no protection
+  // either (neither attempt has reached the network yet) — so two concurrent
+  // sends of the same bolt11 both saw an empty set and both debited. Observed
+  // in production: two payment records for one invoice, a61cea38 and 0c85ab32.
+  // Harmless that time (the second failed against an already-paid invoice and
+  // reversed), but two live attempts on one invoice is also how it gets paid
+  // twice.
+  if (!(await db.sAdd("pending", pr)))
     fail("Previous attempt is still settling, please retry in a minute");
 
-  p = await debit({
-    hash: pr,
-    amount: amount_msat ? Math.round(amount_msat / 1000) : amount,
-    fee,
-    memo,
-    user,
-    type: PaymentType.lightning,
-    maxTotal,
-  });
-
-  await db.sAdd("pending", pr);
+  try {
+    p = await debit({
+      hash: pr,
+      amount: amount_msat ? Math.round(amount_msat / 1000) : amount,
+      fee,
+      memo,
+      user,
+      type: PaymentType.lightning,
+      maxTotal,
+    });
+  } catch (e) {
+    // Release the claim. debit() rejects for entirely ordinary reasons —
+    // insufficient funds, a global freeze, a limit — and holding the invoice
+    // for a minute after each one would be worse than the race it prevents.
+    // A claim leaked by a crash between here and finalize()/reverse() is
+    // self-healing: check() drops a `pending` entry whose payment record no
+    // longer exists anywhere.
+    await db.sRem("pending", pr);
+    throw e;
+  }
 
   l("paying lightning invoice", pr.substr(-8), amount, fee);
 
