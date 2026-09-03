@@ -24,14 +24,30 @@ function makeLndClient() {
       tls: { ca: tlsCert },
     });
     const text = await res.text();
+
+    let json: any;
     try {
-      const json = JSON.parse(text);
-      if (json.error || json.code) throw new Error(json.message || json.error);
-      return json.result ?? json;
-    } catch (e: any) {
-      if (e.message) throw e;
-      throw new Error(text);
+      json = JSON.parse(text);
+    } catch {
+      // Not JSON at all — an HTML error page from a proxy, an empty body, a
+      // TLS/auth rejection. The raw text is the only diagnostic there is.
+      // The previous shape rethrew JSON.parse's own SyntaxError here (it has
+      // a .message, so the `if (e.message) throw e` branch caught it), which
+      // reported "Unexpected token ..." and discarded the actual response.
+      throw new Error(text || `${res.status} ${res.statusText}`);
     }
+
+    if (json.error || json.code) {
+      // LND returns `error` as a plain string on some endpoints and as an
+      // object ({code, message, details}) on others. `new Error(obj)` runs
+      // String(obj), so an object arrived in the logs as the literal
+      // "[object Object]" with the entire failure reason gone — which is
+      // exactly what production reported for a failed payinvoice.
+      const detail = json.message ?? json.error;
+      throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    }
+
+    return json.result ?? json;
   }
 
   return {
