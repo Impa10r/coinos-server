@@ -295,12 +295,30 @@ export const debit = async ({
     }
   }
 
+  // The freeze case is split out from the limit cases on purpose. A global
+  // freeze blocks EVERY non-whitelisted send, so while it's on this fires
+  // continuously — it's an operator-chosen state, not a finding, and at warn
+  // level it buries real problems. The limit cases stay at warn: those are
+  // per-user or per-asset and worth looking at.
+  //
+  // `hash` is a full bolt11 here (~700 chars) and was printed in full, twice
+  // per attempt counting routes/payments.ts's own catch. Last 8, as
+  // everywhere else in this file.
+  if (frozen && !whitelisted) {
+    l("Blocking", user.username, amount, hash?.slice(-8), user.id, type, "frozen");
+    // Say what's actually happening. "Problem sending payment" reads as a
+    // routing failure, so users retry it immediately and repeatedly (one
+    // account hit the same invoice four times in 20 seconds). The fund and
+    // internal-transfer paths already say "temporarily disabled"; this is
+    // the same operator state and the vagueness bought nothing.
+    fail("Payments are temporarily disabled");
+  }
+
   if (
-    frozen && !whitelisted ||
     (userLimit != null && amount > userLimit && !whitelisted) ||
     (!skipServerLimit && serverLimit != null && amount > serverLimit)
   ) {
-    warn("Blocking", user.username, amount, hash, user.id, type, frozen, userLimit, serverLimit);
+    warn("Blocking", user.username, amount, hash?.slice(-8), user.id, type, userLimit, serverLimit);
 
     fail("Problem sending payment");
   }

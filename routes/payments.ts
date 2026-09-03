@@ -170,8 +170,21 @@ export default {
 
       return c.json(p);
     } catch (e) {
-      warn(user.username, "payment failed", amount, balance, hash, payreq);
-      err(shortError(e.message));
+      // One line, with the reason attached to the context. The separate
+      // err(shortError(e.message)) that used to follow logged the bare
+      // message with no user, amount, or invoice — at error level, so a
+      // routine freeze rejection read as "Problem sending payment" with
+      // nothing to tie it to. payreq is a full bolt11 (~700 chars) and was
+      // printed in full on every attempt; last 8, as elsewhere.
+      warn(
+        user.username,
+        "payment failed",
+        amount,
+        balance,
+        hash,
+        payreq?.slice(-8),
+        shortError(e.message),
+      );
       return bail(c, e.message);
     }
   },
