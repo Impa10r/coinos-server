@@ -46,6 +46,9 @@ export const emit = (uid, type, data) => {
 
   for (const id in store.sockets[uid]) {
     const ws = store.sockets[uid][id];
+    // Read-only sockets (POS terminals logged in with a "-ro" token) only
+    // get payment notifications, mirroring the HTTP read-only whitelist.
+    if (ws.readonly && type !== "payment") continue;
     try {
       ws.send(JSON.stringify({ type, data }));
       sent++;
@@ -74,9 +77,16 @@ export const broadcast = (type, data) => {
 
 const track = async (ws, token) => {
   const { id } = ws;
-  const { id: uid } = verifyToken(token) || {};
+  let { id: uid } = verifyToken(token) || {};
 
   if (!uid) fail("Invalid JWT token");
+
+  // Read-only tokens (see users.ro) carry "<uid>-ro". The HTTP auth layer
+  // strips the suffix for whitelisted routes; do the same here so a POS
+  // device can log in and receive payment events, but nothing else.
+  const readonly = uid.endsWith("-ro");
+  if (readonly) uid = uid.slice(0, -3);
+
   const user = await getUser(uid);
   if (!user) fail(`User not found ${uid}`);
 
@@ -91,6 +101,7 @@ const track = async (ws, token) => {
   store.sockets[uid][id] = ws;
   users[id] = uid;
   ws.user = user;
+  ws.readonly = readonly;
 };
 
 export const websocket = {
