@@ -1,4 +1,6 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const sanitizeImageUrl = (url: string | undefined): string | undefined => {
   if (!url) return url;
@@ -1513,6 +1515,10 @@ export default {
   },
 
   async flash(c) {
+    // Build in a per-request scratch dir. A shared ./printer/config.txt and
+    // ./littlefs.img let two overlapping requests hand one user the other's
+    // wifi key and API token.
+    const dir = await mkdtemp(join(tmpdir(), "flash-"));
     try {
       const body = await c.req.json();
       const { ssid, key, token } = body;
@@ -1523,15 +1529,21 @@ export default {
       // LittleFS partition, so the error text got flashed as the filesystem.
       if (!ssid || !key || !token) fail("ssid, key and token required");
       const cfg = `${ssid.trim()}\n${key.trim()}\n${token.trim()}\n`;
-      await mkdir("./printer", { recursive: true });
-      await writeFile("./printer/config.txt", cfg, "utf8");
-      await $`./mklittlefs -c ./printer -p 256 -b 4096 -s 0x20000 ./littlefs.img`;
-      return new Response(Bun.file("./littlefs.img"), {
+      const src = join(dir, "fs");
+      const img = join(dir, "littlefs.img");
+      await mkdir(src);
+      await writeFile(join(src, "config.txt"), cfg, "utf8");
+      await $`./mklittlefs -c ${src} -p 256 -b 4096 -s 0x20000 ${img}`;
+      // Read it fully rather than streaming with Bun.file: the finally below
+      // removes the directory, and a lazy stream would be read after that.
+      return new Response(await readFile(img), {
         headers: { "Content-Type": "application/octet-stream" },
       });
     } catch (e: any) {
       warn("flash failed", e.message);
       return bail(c, e.message);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
     }
   },
 
