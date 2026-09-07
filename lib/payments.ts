@@ -2334,9 +2334,21 @@ const finalize = async (r, p) => {
   // Wrap in try so a refund failure can't strand the payment without
   // notifying the UI — preimage is already in hand.
   try {
-    const decoded: any = await ln.decode(p.hash);
-    const invoiceMsat =
-      decoded.amount_msat || decoded.invoice_amount_msat || Math.abs(p.amount) * 1000;
+    // The debited amount is the amount delivered, so it's already the right
+    // answer whenever decode can't supply one — an open bolt11 (no amount_msat,
+    // typical for LNURL-pay), and a KEYSEND, where p.hash is a label rather
+    // than an invoice (sendKeysend's only caller, NWC pay_keysend, passes a
+    // nostr event id) so ln.decode throws outright.
+    //
+    // That throw used to escape the whole try, skipping the fee step: p.fee
+    // stayed at the full reserve and tbRefund never ran, so every keysend and
+    // zap was charged the maximum fee with no refund. Catching it here keeps
+    // the refund working, and fee = sent - delivered is correct either way.
+    let invoiceMsat = Math.abs(p.amount) * 1000;
+    try {
+      const decoded: any = await ln.decode(p.hash);
+      invoiceMsat = decoded.amount_msat || decoded.invoice_amount_msat || invoiceMsat;
+    } catch {}
     l("finalize", p.id, "amount_sent_msat", r.amount_sent_msat, "invoice_msat", invoiceMsat);
     p.fee = Math.max(0, Math.round((r.amount_sent_msat - invoiceMsat) / 1000));
     if (!Number.isFinite(p.fee)) p.fee = maxfee;
