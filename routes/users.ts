@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 
 const sanitizeImageUrl = (url: string | undefined): string | undefined => {
   if (!url) return url;
@@ -1446,14 +1446,26 @@ export default {
   },
 
   async flash(c) {
-    const body = await c.req.json();
-    const { ssid, key, token } = body;
-    const cfg = `${ssid.trim()}\n${key.trim()}\n${token.trim()}\n`;
-    await writeFile("./printer/config.txt", cfg, "utf8");
-    await $`./mklittlefs -c ./printer -p 256 -b 4096 -s 0x20000 ./littlefs.img`;
-    return new Response(Bun.file("./littlefs.img"), {
-      headers: { "Content-Type": "application/octet-stream" },
-    });
+    try {
+      const body = await c.req.json();
+      const { ssid, key, token } = body;
+      // Without this, a missing field made `ssid.trim()` throw a TypeError and
+      // an absent ./printer directory made writeFile throw ENOENT — both
+      // escaping to app.onError, which answers 200-less but still with a JSON
+      // body. The flasher writes whatever comes back to the device as the
+      // LittleFS partition, so the error text got flashed as the filesystem.
+      if (!ssid || !key || !token) fail("ssid, key and token required");
+      const cfg = `${ssid.trim()}\n${key.trim()}\n${token.trim()}\n`;
+      await mkdir("./printer", { recursive: true });
+      await writeFile("./printer/config.txt", cfg, "utf8");
+      await $`./mklittlefs -c ./printer -p 256 -b 4096 -s 0x20000 ./littlefs.img`;
+      return new Response(Bun.file("./littlefs.img"), {
+        headers: { "Content-Type": "application/octet-stream" },
+      });
+    } catch (e: any) {
+      warn("flash failed", e.message);
+      return bail(c, e.message);
+    }
   },
 
   async app(c) {
