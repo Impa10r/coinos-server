@@ -962,6 +962,11 @@ export default {
     } catch (e) {
       warn("problem estimating fee", e.message, user.username, body.amount, body.address);
       let msg = e.message;
+      // Pass this one through untouched. The UI matches on it to render the
+      // translated "Amount exceeds hot wallet balance", and prefixing it with
+      // "Failed to prepare transaction" would break that match while burying
+      // the only part of the message that means anything to the user.
+      if (msg === "Not enough funds in hot wallet") return bail(c, msg);
       if (msg.includes("500")) msg = "";
       return bail(c, `Failed to prepare transaction ${msg}`);
     }

@@ -1835,11 +1835,31 @@ export const build = async ({ aid, amount, address, feeRate, subtract, user }) =
 
     raw = await node.createRawTransaction([], outs, 0, true);
 
-    tx = await node.fundRawTransaction(raw, {
-      fee_rate: feeRate,
-      replaceable: true,
-      subtractFeeFromOutputs: [0],
-    });
+    try {
+      tx = await node.fundRawTransaction(raw, {
+        fee_rate: feeRate,
+        replaceable: true,
+        subtractFeeFromOutputs: [0],
+      });
+    } catch (e: any) {
+      // By this point both remaining failure modes are the hot wallet being
+      // short, and neither is anything the user can act on: "Insufficient
+      // funds" when coin selection can't reach the target at all, and "amount
+      // too small to pay the fee" when it can but the fee would eat the whole
+      // output. This call was unwrapped, so bitcoind's raw text reached the
+      // client verbatim — where "Insufficient funds" reads as if the USER's
+      // balance were the problem. It isn't: coin selection only sees TRUSTED
+      // inputs, so an unconfirmed deposit makes every send fail this way
+      // regardless of amount, which is exactly how a 1,000 sat send failed
+      // while the wallet held ~11,800.
+      //
+      // The wording is a sentinel the UI matches to show the translated
+      // payments.exceedsHotWallet (present in all 19 locales) — keep the
+      // phrase "hot wallet" in it if you reword.
+      if (/insufficient|too small to pay the fee/i.test(e.message))
+        fail("Not enough funds in hot wallet");
+      throw e;
+    }
 
     fee = isBitcoin ? sats(tx.fee) : LIQUID_NETWORK_FEE;
   }
