@@ -1327,8 +1327,36 @@ export default {
   async btcHotBalance(c) {
     try {
       const bc = rpc(config.bitcoin);
-      const amount = sats(await bc.getBalance());
-      return c.json({ amount });
+
+      // Sum spendable UTXOs rather than calling getbalance. getbalance COUNTS
+      // LOCKED OUTPUTS; fundrawtransaction's coin selection cannot spend them.
+      // So a locked UTXO made this endpoint report money that no send could
+      // use, and the UI's exceedsBtcHot guard — the check whose whole job is
+      // to stop a send the hot wallet can't cover — passed the amount through
+      // to fail server-side instead. listunspent omits locked outputs, which
+      // is exactly the view coin selection has. minconf 0 to match: build()
+      // can spend trusted unconfirmed change.
+      // `safe` is false for unconfirmed outputs received from someone else,
+      // which fundrawtransaction won't touch either (include_unsafe defaults
+      // to false) — so filtering on it is what keeps minconf 0 from
+      // overstating by counting deposits that haven't confirmed yet.
+      const utxos = await bc.listUnspent(0);
+      const spendable = (utxos || [])
+        .filter((u: any) => u.spendable !== false && u.safe !== false)
+        .reduce((t: number, u: any) => t + sats(u.amount), 0);
+
+      // A large gap means wallet funds exist that nothing can spend — almost
+      // always UTXOs left locked by a send that died between lockUnspent() and
+      // broadcast (Core's locks are in-memory and this code doesn't set
+      // persistent ones, so they survive until bitcoind restarts or something
+      // unlocks them). Silent otherwise, and worth chasing when it appears:
+      // it strands hot-wallet liquidity with no other symptom.
+      const total = sats(await bc.getBalance());
+      if (total - spendable > 1000)
+        warn("btc hot balance: unspendable funds", total - spendable, "of", total,
+             "— check listlockunspent");
+
+      return c.json({ amount: spendable });
     } catch (e) {
       return bail(c, e.message);
     }
