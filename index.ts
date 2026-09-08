@@ -1,7 +1,7 @@
 import app, { routeRateLimit } from "$lib/app";
 import { admin, auth, optional } from "$lib/auth";
 
-import { fixBolt12, listenForLightning, ensureListenerAlive } from "$lib/lightning";
+import { listenForLightning, ensureListenerAlive } from "$lib/lightning";
 import { l } from "$lib/logging";
 import { startHealthCheck } from "$lib/health";
 import { getLocations } from "$lib/locations";
@@ -251,12 +251,13 @@ app.post("/shopify/:id", shopify);
 
 app.post("/hidepay", admin, users.hidepay);
 app.post("/unlimit", admin, users.unlimit);
-// SECURITY: this was unauthenticated. fixBolt12 is a one-off repair routine —
-// it full-scans payment:*, DELETES payment records, and calls tbSetBalance to
-// subtract from user balances. Anyone who knew the path could trigger it. Gate
-// it like the other destructive ops routes above; better still, drop the route
-// and run it as a script, since it has no business being reachable over HTTP.
-app.get("/bolt12", admin, fixBolt12);
+// GET /bolt12 removed. It served fixBolt12(), a one-off repair routine that
+// full-scans payment:*, deletes payment records and calls tbSetBalance to
+// subtract from user balances — and it was UNAUTHENTICATED, so anyone who knew
+// the path could trigger it. Nothing that destructive belongs behind a URL at
+// all, admin-gated or not. The function is still exported from $lib/lightning
+// for deliberate one-off use:
+//   docker exec -it app bun -e 'import("$lib/lightning").then(m => m.fixBolt12())'
 
 app.get("/cash/:id/:version", ecash.get);
 app.post("/cash", ecash.save);

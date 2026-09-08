@@ -421,7 +421,11 @@ export async function replay(index) {
   }
 }
 
-export const fixBolt12 = async (c) => {
+// One-off repair routine. NOT a route any more — it deletes payment records
+// and rewrites balances via tbSetBalance, and it used to sit behind an
+// unauthenticated GET /bolt12. Run it deliberately, by hand, when you actually
+// mean to. The context is optional so it can be called without one.
+export const fixBolt12 = async (c?: any) => {
   for await (const k of scan("payment:*")) {
     const p = await g(k);
     if (p.type === "bolt12") {
@@ -439,5 +443,5 @@ export const fixBolt12 = async (c) => {
     }
   }
 
-  return c.json({});
+  return c?.json({});
 };
