@@ -2,6 +2,7 @@ import * as crypto from "crypto";
 import config from "$config";
 import { db, g, s } from "$lib/db";
 import { generate } from "$lib/invoices";
+import { warn } from "$lib/logging";
 import { SATS, bail, getUser } from "$lib/utils";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { utf8ToBytes } from "@noble/hashes/utils.js";
@@ -53,7 +54,7 @@ export default {
       await s(result.merchantId, user.id);
       return c.json({});
     } catch (e) {
-      console.log(e);
+      warn("auth failed", e.message);
     }
   },
 

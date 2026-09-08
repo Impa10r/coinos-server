@@ -45,7 +45,6 @@ export default {
       return c.json(result);
     } catch (e) {
       console.trace();
-      console.log(e);
       err("problem generating invoice", c.get("user")?.username, body.user?.username, e.message);
       return bail(c, e.message);
     }

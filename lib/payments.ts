@@ -2228,7 +2228,6 @@ export const importAccountHistory = async (account) => {
     account.importedAt = account.importedAt || Date.now();
     await s(`account:${account.id}`, account);
   } catch (e) {
-    console.log(e);
     warn("problem importing account history", e.message, account);
   }
 };

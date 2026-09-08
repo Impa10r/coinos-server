@@ -1,6 +1,7 @@
 import config from "$config";
 import { db, g } from "$lib/db";
 import ln from "$lib/ln";
+import { warn } from "$lib/logging";
 import { getMlsUsers } from "$lib/mls";
 import { EX, get, getCount, getNostrUser, getProfile, publish, q, serverPubkey } from "$lib/nostr";
 import { parseContent } from "$lib/notes";
@@ -120,7 +121,7 @@ export default {
 
       return c.json(event);
     } catch (e) {
-      console.log(e);
+      warn("event failed", e.message);
       return bail(c, e.message);
     }
   },
@@ -170,7 +171,7 @@ export default {
 
       return c.json(thread);
     } catch (e) {
-      console.log(e);
+      warn("thread failed", e.message);
       return bail(c, e.message);
     }
   },
@@ -202,7 +203,7 @@ export default {
 
       return c.json(zaps.filter((z) => z.amount > 0));
     } catch (e) {
-      console.log(e);
+      warn("zaps failed", e.message);
       return bail(c, e.message);
     }
   },
@@ -223,7 +224,7 @@ export default {
 
       return c.json({});
     } catch (e) {
-      console.log(e);
+      warn("publish failed", e.message);
       return bail(c, e.message);
     }
   },
@@ -248,7 +249,7 @@ export default {
 
       return c.json(events);
     } catch (e) {
-      console.log(e);
+      warn("events failed", e.message);
       return bail(c, e.message);
     }
   },
@@ -320,7 +321,7 @@ export default {
 
       return c.json(followers);
     } catch (e) {
-      console.log(e);
+      warn("followers failed", e.message);
       return bail(c, e.message);
     }
   },
@@ -330,7 +331,7 @@ export default {
       const pubkey = c.req.param("pubkey");
       return c.json(await getCount(pubkey));
     } catch (e) {
-      console.log(e);
+      warn("count failed", e.message);
       return bail(c, e.message);
     }
   },
@@ -393,7 +394,7 @@ export default {
 
       return c.json(event);
     } catch (e) {
-      console.log(e);
+      warn("zapRequest failed", e.message);
     }
   },
 
@@ -413,7 +414,7 @@ export default {
 
       return c.json(json);
     } catch (e) {
-      console.log(e);
+      warn("zap failed", e.message);
       return bail(c, e.message);
     }
   },

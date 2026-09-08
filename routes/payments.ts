@@ -313,7 +313,6 @@ export default {
       if (p?.type === PaymentType.fund) p.with = await getUser(p.uid, fields);
       return c.json(p);
     } catch (e) {
-      console.log(e);
       err("failed to get payment", e.message);
       return bail(c, e.message);
     }
@@ -363,7 +362,6 @@ export default {
         description: decoded.offer_description || decoded.description,
       });
     } catch (e) {
-      console.log(e);
       err("problem parsing", e.message);
       return bail(c, e.message);
     }
@@ -927,7 +925,6 @@ export default {
       }
       return c.json({});
     } catch (e: any) {
-      console.log(e);
       warn(`problem processing ${txid}`, e?.message ?? String(e));
       return bail(c, e.message);
     }
@@ -1006,7 +1003,7 @@ export default {
       await s("freeze", true);
       return c.json({ ok: true });
     } catch (e: any) {
-      console.log(e);
+      warn("freeze failed", e.message);
       return c.json({ error: e?.message ?? "internal error" }, 500);
     }
   },
@@ -1075,7 +1072,7 @@ export default {
 
       return c.json(p);
     } catch (e) {
-      console.log(e);
+      warn("lnaddress failed", e.message);
       return bail(c, e.message);
     }
   },

@@ -337,7 +337,7 @@ export default {
       l("enabled 2fa", username);
       return c.json({});
     } catch (e) {
-      console.log(e);
+      warn("enable2fa failed", e.message);
       return bail(c, e.message);
     }
   },
@@ -501,7 +501,6 @@ export default {
       emit(user.id, "user", pick(user, whitelist));
       return c.json({ user: pick(user, whitelist) });
     } catch (e) {
-      console.log(e);
       warn("failed to update", user.username, e.message);
       return bail(c, e.message);
     }
@@ -614,7 +613,6 @@ export default {
       user = pick(user, whitelist);
       return c.json({ user, token });
     } catch (e) {
-      console.log(e);
       err("login error", e.message, c.env?.ip);
       return c.json({}, 401);
     }
@@ -681,7 +679,6 @@ export default {
       user = pick(user, whitelist);
       return c.json({ user, token });
     } catch (e) {
-      console.log(e);
       err("authkey login error", e.message, c.env?.ip);
       return c.json({}, 401);
     }
@@ -740,7 +737,6 @@ export default {
       user = pick(user, whitelist);
       return c.json({ user, token });
     } catch (e) {
-      console.log(e);
       err("nostr login error", e.message, c.env?.ip);
       return c.json({}, 401);
     }
@@ -764,7 +760,7 @@ export default {
       await db.sAdd(`${id}:subscriptions`, JSON.stringify(subscription));
       return c.json(subscription);
     } catch (e) {
-      console.log(e);
+      warn("subscription failed", e.message);
       return bail(c, e.message);
     }
   },
@@ -777,7 +773,7 @@ export default {
       await db.sRem(`${id}:subscriptions`, JSON.stringify(subscription));
       return c.json(subscription);
     } catch (e) {
-      console.log(e);
+      warn("deleteSubscription failed", e.message);
       return bail(c, e.message);
     }
   },
@@ -1240,7 +1236,7 @@ export default {
 
       return c.json(accounts.reverse());
     } catch (e) {
-      console.log(e);
+      warn("accounts failed", e.message);
       return bail(c, e.message);
     }
   },
@@ -1403,7 +1399,7 @@ export default {
 
       return c.json({ ok: true });
     } catch (e) {
-      console.log(e);
+      warn("deleteAccount failed", e.message);
       return bail(c, e.message);
     }
   },
@@ -1626,7 +1622,7 @@ export default {
 
       return c.json({ nwc });
     } catch (e) {
-      console.log(e);
+      warn("updateApp failed", e.message);
       return bail(c, e.message);
     }
   },
@@ -1646,7 +1642,7 @@ export default {
       await db.del(`app:${pubkey}`);
       return c.json({});
     } catch (e) {
-      console.log(e);
+      warn("deleteApp failed", e.message);
       return bail(c, e.message);
     }
   },
@@ -1696,7 +1692,7 @@ export default {
       const options = await generatePasskeyRegistration(user, origin);
       return c.json(options);
     } catch (e) {
-      console.log(e);
+      warn("passkeyRegisterOptions failed", e.message);
       return bail(c, e.message);
     }
   },
@@ -1712,7 +1708,7 @@ export default {
       await s(`user:${user.id}`, user);
       return c.json({ ok: true });
     } catch (e) {
-      console.log(e);
+      warn("passkeyRegisterVerify failed", e.message);
       return bail(c, e.message);
     }
   },
@@ -1724,7 +1720,7 @@ export default {
       const options = await generatePasskeyLogin(origin);
       return c.json(options);
     } catch (e) {
-      console.log(e);
+      warn("passkeyLoginOptions failed", e.message);
       return bail(c, e.message);
     }
   },
@@ -1739,7 +1735,7 @@ export default {
       const token = jwt.sign(payload, config.jwt);
       return c.json({ user: pick(user, whitelist), token });
     } catch (e) {
-      console.log(e);
+      warn("passkeyLoginVerify failed", e.message);
       return bail(c, e.message);
     }
   },
