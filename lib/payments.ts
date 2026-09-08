@@ -1620,8 +1620,25 @@ const getAddressType = async (a) => {
   try {
     await bc.getAddressInfo(a);
     return PaymentType.bitcoin;
-  } catch (e) {
-    err("getAddressInfo failed", `code: ${e.code} message: ${e.message}`);
+  } catch (e: any) {
+    // -5 is bitcoind simply saying "that isn't a bitcoin address", which is
+    // the expected answer for every liquid address. This probe runs on every
+    // build(), so logging it at error level meant a level-50 line per liquid
+    // send — noise that buries real errors.
+    //
+    // Anything else means bitcoind ITSELF is the problem, and falling through
+    // to the liquid probe would then misreport a node outage as "unrecognized
+    // address" for a perfectly valid bitcoin address. The liquid branch below
+    // already guards the mirror of this; do the same here.
+    if (e?.code !== -5) {
+      warn("getAddressInfo failed", `code: ${e.code} message: ${e.message}`);
+      if (
+        e?.message?.includes("Unable to connect") ||
+        e?.code === "ECONNREFUSED" ||
+        e?.code === "ETIMEDOUT"
+      )
+        fail("bitcoin temporarily unavailable");
+    }
     try {
       await lq.getAddressInfo(a);
       return PaymentType.liquid;
@@ -1645,7 +1662,10 @@ const buildNonCustodial = async ({ aid, amount, address, feeRate, subtract }) =>
   if (!account?.pubkey) fail("account missing pubkey");
 
   amount = Number.parseInt(amount);
-  if (amount < 0) fail("invalid amount");
+  // Same guard as build() below: `< 0` alone admits 0 and NaN (NaN < 0 is
+  // false), neither of which can produce a valid transaction. build()
+  // delegates here before reaching its own check, so this path needs it too.
+  if (!Number.isFinite(amount) || amount <= 0) fail("Amount must be greater than zero");
 
   const fees: any = await fetch(api.fees).then((r) => r.json());
 
@@ -1770,7 +1790,12 @@ export const build = async ({ aid, amount, address, feeRate, subtract, user }) =
   const node = rpc(config[type]);
   const isBitcoin = type === PaymentType.bitcoin;
   amount = Number.parseInt(amount);
-  if (amount < 0) fail("invalid amount");
+  // `amount < 0` alone let two values through that can never produce a valid
+  // transaction: 0, and NaN from a missing or non-numeric amount (NaN < 0 is
+  // false). Both reached the node and came back as its own "Transaction amount
+  // too small", which tells the user nothing about what they did wrong — a
+  // zero-value output is invalid in both Bitcoin and Elements.
+  if (!Number.isFinite(amount) || amount <= 0) fail("Amount must be greater than zero");
 
   const fees: any =
     type === PaymentType.liquid
