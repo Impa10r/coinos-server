@@ -251,7 +251,12 @@ app.post("/shopify/:id", shopify);
 
 app.post("/hidepay", admin, users.hidepay);
 app.post("/unlimit", admin, users.unlimit);
-app.get("/bolt12", fixBolt12);
+// SECURITY: this was unauthenticated. fixBolt12 is a one-off repair routine —
+// it full-scans payment:*, DELETES payment records, and calls tbSetBalance to
+// subtract from user balances. Anyone who knew the path could trigger it. Gate
+// it like the other destructive ops routes above; better still, drop the route
+// and run it as a script, since it has no business being reachable over HTTP.
+app.get("/bolt12", admin, fixBolt12);
 
 app.get("/cash/:id/:version", ecash.get);
 app.post("/cash", ecash.save);

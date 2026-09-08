@@ -289,7 +289,7 @@ export default {
 
       return c.json(follows);
     } catch (e) {
-      console.log("follows fail", e);
+      warn("follows fail", e.message);
       return bail(c, e.message);
     }
   },

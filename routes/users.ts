@@ -132,7 +132,7 @@ export default {
 
       return c.json(pick(user, whitelist));
     } catch (e) {
-      console.log("problem fetching user", e);
+      warn("problem fetching user", e.message);
       return c.json(e.message, 500);
     }
   },

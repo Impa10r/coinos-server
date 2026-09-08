@@ -1,4 +1,5 @@
 import { db, g } from "$lib/db";
+import { warn } from "$lib/logging";
 
 export default {
   async list(c) {
@@ -41,7 +42,7 @@ export default {
 
       return c.json({ locations });
     } catch (e) {
-      console.log("nearby search failed", e);
+      warn("nearby search failed", e.message);
       const locations = await g("locations");
       return c.json({ locations });
     }

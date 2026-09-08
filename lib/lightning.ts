@@ -425,7 +425,7 @@ export const fixBolt12 = async (c) => {
   for await (const k of scan("payment:*")) {
     const p = await g(k);
     if (p.type === "bolt12") {
-      console.log(k);
+      l("fixBolt12", k);
       const { invoices } = await ln.listinvoices({ invstring: p.hash });
       const { local_offer_id } = invoices[0];
       const oid = await g(`payment:${local_offer_id}`);

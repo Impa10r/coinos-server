@@ -733,7 +733,7 @@ const handle = (method, params, ev, app, user) =>
             try {
               await handleZap(inv, user.pubkey);
             } catch (e) {
-              console.log("zap receipt failed", e);
+              warn("zap receipt failed", e.message);
             }
           }
 
@@ -897,7 +897,7 @@ const handle = (method, params, ev, app, user) =>
               try {
                 await handleZap(inv, user.pubkey);
               } catch (e) {
-                console.log("zap receipt failed", e);
+                warn("zap receipt failed", e.message);
               }
             }
           }

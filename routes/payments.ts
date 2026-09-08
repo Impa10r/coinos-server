@@ -1192,13 +1192,11 @@ export default {
 
   async auth(c) {
     const query = c.req.query();
-    console.log(query);
     return c.json(query);
   },
 
   async order(c) {
     const body = await c.req.json();
-    console.log(body);
     return c.json(body);
   },
 
