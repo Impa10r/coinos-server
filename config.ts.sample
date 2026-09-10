@@ -103,6 +103,21 @@ export default {
   // usually not what you want: these need to reach whoever can act at 3am,
   // not a ticket queue.
   alertEmail: "ops@coinos.io",
+  // Outgoing mail. Set `host` and everything — alerts AND user-facing mail
+  // (verification, password reset, payment notifications) — goes over SMTP.
+  // Leave it out and it falls back to AWS SES in us-east-2, reading
+  // credentials from /root/.aws, which is what this used before SMTP existed.
+  //
+  // `from` is optional; without it messages are sent as `support` above, which
+  // your SMTP provider may reject if that address isn't one it will send for.
+  // Prove delivery with: bun scripts/test-alert.ts
+  smtp: {
+    host: "smtp.example.com",
+    port: 587, // 465 uses implicit TLS; anything else negotiates STARTTLS
+    user: "apikey",
+    pass: "replace-me",
+    from: '"Coinos" <alerts@coinos.io>',
+  },
   // SECURITY: generate fresh keys — never deploy these sample values. These are
   // the server NWC wallet-service key and the zap-receipt signer.
   //   node -e "import('nostr-tools').then(n=>console.log(n.nip19.nsecEncode(n.generateSecretKey())))"
