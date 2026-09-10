@@ -1,5 +1,5 @@
 import { db, g, s } from "$lib/db";
-import { err } from "$lib/logging";
+import { err, l } from "$lib/logging";
 import { fields, getUser } from "$lib/utils";
 import got from "got";
 
@@ -12,6 +12,15 @@ const dedup = (array) =>
       return acc;
     }, {}),
   );
+
+// btcmap goes down from time to time (a 502 from their gateway, a timeout).
+// This loop retries every 60s, keeps the previously cached locations on
+// failure, and only advances `locations:since` on success — so a blip costs
+// one skipped refresh and loses no window. Escalate on sustained failure
+// instead of on every tick: a single miss isn't worth an error-level line,
+// but an hour of them means btcmap is properly down or we've been blocked.
+let locationFailures = 0;
+const LOCATION_FAILURES_BEFORE_ERR = 60;
 
 export const getLocations = async () => {
   try {
@@ -60,8 +69,12 @@ export const getLocations = async () => {
       await db.geoAdd("locations:geo", { longitude: lon, latitude: lat, member: String(loc.id) });
       await s(`location:${loc.id}`, loc);
     }
+    locationFailures = 0;
   } catch (e) {
-    err("problem fetching locations", e.message);
+    locationFailures++;
+    if (locationFailures >= LOCATION_FAILURES_BEFORE_ERR)
+      err("problem fetching locations", `${locationFailures} consecutive`, e.message);
+    else l("problem fetching locations (transient)", e.message);
   }
 
   setTimeout(getLocations, 60000);
