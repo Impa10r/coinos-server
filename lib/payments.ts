@@ -19,6 +19,7 @@ import { generate } from "$lib/invoices";
 import ln from "$lib/ln";
 import lnd from "$lib/lnd";
 import { assertWithinSpendLimit } from "$lib/spend-budget";
+import { assertWithdrawBreaker, recordWithdrawal } from "$lib/withdraw-breaker";
 
 // External-withdrawal lockfiles. Out-of-band emergency stop: a human (or
 // nobal.sh, where that's deployed) touches <host lock dir>/<type>.locked, which
@@ -420,6 +421,16 @@ export const debit = async ({
   // mutate the tip, and drain the account through the internal-payment path.
   assertWithinSpendLimit({ amount, tip, fee, ourfee, maxTotal });
 
+  // Cumulative outflow ceiling across ALL accounts — the control that catches
+  // a steady drain made of individually unremarkable sends, which every
+  // per-payment limit above lets through. Internal transfers are exempt: they
+  // move balance between coinos users without touching an external wallet, so
+  // they can't drain anything. NOT whitelist-exempt, deliberately: a
+  // compromised whitelisted credential is precisely the case the other
+  // controls don't cover. Opt-in — disabled unless WITHDRAW_CUM_MAX_SAT is set.
+  if (type !== PaymentType.internal)
+    await assertWithdrawBreaker({ amount, type, username: user?.username });
+
   const frozenBalance = !blacklisted || whitelisted ? 0 : await getBalance(uid);
 
   ourfee = await tbDebit(
@@ -435,6 +446,12 @@ export const debit = async ({
   );
 
   if (ourfee.err) fail(ourfee.err);
+
+  // Count it only now that the ledger has actually moved. Recording at the
+  // check above would let attempts that fail for unrelated reasons (a rejected
+  // route, insufficient funds) eat the allowance, which would hand anyone with
+  // an account a way to trip the breaker on purpose and halt withdrawals.
+  if (type !== PaymentType.internal) recordWithdrawal({ amount, type });
 
   // Defense-in-depth: the DEBIT lua rejects overdrafts, so a negative balance
   // here means the invariant was violated by a mismatched input or a non-lua

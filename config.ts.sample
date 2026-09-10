@@ -98,6 +98,11 @@ export default {
   },
   mqttUrl: "mqtt://mqtt.coinos.io",
   support: "support@coinos.io",
+  // Where operator alerts go — currently the withdrawal circuit breaker
+  // (lib/withdraw-breaker.ts). Falls back to `support` when unset, which is
+  // usually not what you want: these need to reach whoever can act at 3am,
+  // not a ticket queue.
+  alertEmail: "ops@coinos.io",
   // SECURITY: generate fresh keys — never deploy these sample values. These are
   // the server NWC wallet-service key and the zap-receipt signer.
   //   node -e "import('nostr-tools').then(n=>console.log(n.nip19.nsecEncode(n.generateSecretKey())))"

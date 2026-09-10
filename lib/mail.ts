@@ -1,4 +1,4 @@
-import { l, err } from "$lib/logging";
+import { l, err, warn } from "$lib/logging";
 import config from "$config";
 import { SESClient } from "@aws-sdk/client-ses";
 import { SendEmailCommand } from "@aws-sdk/client-ses";
@@ -11,6 +11,35 @@ export const templates = {
   verifyEmail: "templates/payments/verify.html",
   paymentReceived: "templates/payments/received.html",
   passwordReset: "templates/payments/reset.html",
+};
+
+// Operator alert. Unlike mail(), this takes no user and no handlebars
+// template — it goes to config.alertEmail (falling back to config.support) and
+// carries a preformatted body, so a safety mechanism can raise the alarm
+// without needing a template file or a user record to hang it on.
+//
+// Never throws: callers are incident paths, and a failed notification must not
+// take down whatever it was reporting on.
+export const alert = async (subject: string, body: string) => {
+  const to = (config as any).alertEmail || config.support;
+  try {
+    if (!to) return warn("alert: no alertEmail or support address configured", subject);
+    l("sending alert", subject);
+
+    const client = new SESClient({ region: "us-east-2" });
+    await client.send(
+      new SendEmailCommand({
+        Destination: { ToAddresses: [to] },
+        Message: {
+          Body: { Text: { Charset, Data: body } },
+          Subject: { Charset, Data: subject },
+        },
+        Source: `"Coinos " <${config.support}>`,
+      }),
+    );
+  } catch (e: any) {
+    err("failed to send alert", subject, e.message);
+  }
 };
 
 export const mail = async (user, subject, template, params) => {

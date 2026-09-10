@@ -34,6 +34,18 @@ services:
       URL: http://localhost:5173
       LNURL_PROXY: socks5h://tor:9050
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env - see .env.sample}
+      # Cumulative withdrawal circuit breaker (lib/withdraw-breaker.ts). Every
+      # other outflow control caps a SINGLE payment; this one caps the total,
+      # so a steady drain of individually unremarkable sends trips it. Once the
+      # rolling total would exceed the cap it blocks the crossing send, writes
+      # /locks/ALL.locked to halt all external withdrawals, and emails
+      # config.alertEmail (falling back to config.support).
+      #
+      # UNSET OR 0 DISABLES IT ENTIRELY — pick a number deliberately. Set it to
+      # more than a busy day's legitimate withdrawals and less than an amount
+      # you'd be unhappy to lose. Requires the /locks mount below.
+      WITHDRAW_CUM_MAX_SAT: 0
+      WITHDRAW_WINDOW_HOURS: 24
     ports:
       - '3119:3119'
     volumes:

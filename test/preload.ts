@@ -351,7 +351,11 @@ if (process.env.INTEGRATION) {
     ensureListenerAlive: mock(async () => {}),
     getLightningListenerStatus: mock(() => ({ phase: "idle", phaseStartedAt: Date.now() })),
   }));
-  mock.module("$lib/mail", () => ({ mail: async () => {}, templates: {} }));
+  mock.module("$lib/mail", () => ({
+    mail: async () => {},
+    alert: async () => {},
+    templates: {},
+  }));
   mock.module("$lib/auth", () => ({
     requirePin: async () => {},
     auth: (_r: any, _s: any, n: any) => n(),
