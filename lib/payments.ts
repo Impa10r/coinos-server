@@ -20,11 +20,17 @@ import ln from "$lib/ln";
 import lnd from "$lib/lnd";
 import { assertWithinSpendLimit } from "$lib/spend-budget";
 
-// External-withdrawal lockfiles. Out-of-band emergency stop: nobal.sh (or a
-// human) can `touch /home/adam/locks/<type>.locked` on the host, which is
-// bind-mounted into this container at /locks. Existence of /locks/<type>.locked
-// (or /locks/ALL.locked) blocks all external sends of that type. Lives outside
-// db so it can't be disabled by a db-write vector (May 18 /gateway lesson).
+// External-withdrawal lockfiles. Out-of-band emergency stop: a human (or
+// nobal.sh, where that's deployed) touches <host lock dir>/<type>.locked, which
+// compose bind-mounts into this container at /locks. Existence of
+// /locks/<type>.locked (or /locks/ALL.locked) blocks all external sends of that
+// type. Lives outside db so it can't be disabled by a db-write vector (May 18
+// /gateway lesson).
+//
+// REQUIRES the mount — see compose.yml.sample, which maps /srv/coinos-locks to
+// /locks. Without it this check silently never fires, because the path doesn't
+// exist: no error, no log, just a kill switch that quietly does nothing. Verify
+// with `docker exec app ls -d /locks` after any compose change.
 //
 // Internal payments are never blocked by these — receives and internal
 // transfers between coinos users keep working with the site fully online.

@@ -45,6 +45,18 @@ services:
       - ./data/lnd:/home/bun/app/data/lnd
       - ./mklittlefs:/usr/bin/mklittlefs
       - /home/bun/app/node_modules
+      # Out-of-band withdrawal kill switch. isWithdrawLocked() in
+      # lib/payments.ts blocks every external send of a type while
+      # /locks/<type>.locked exists, and all of them while /locks/ALL.locked
+      # does — internal transfers and receives keep working. Without this mount
+      # that check silently never fires, since the path simply doesn't exist.
+      #
+      # Point the host side OUTSIDE the repo. `./` is already mounted at
+      # /home/bun/app, so a lock dir inside it is writable by anything that can
+      # reach the app directory — which defeats the reason this lives in the
+      # filesystem rather than the db: it is meant to survive a db-write
+      # compromise. Create it first: mkdir -p /srv/coinos-locks
+      - /srv/coinos-locks:/locks
     restart: always
   bc:
     image: asoltys/bitcoin:28.0
