@@ -4,7 +4,6 @@ import { SESClient } from "@aws-sdk/client-ses";
 import { SendEmailCommand } from "@aws-sdk/client-ses";
 import handlebars from "handlebars";
 import fs from "fs";
-import nodemailer from "nodemailer";
 
 const Charset = "UTF-8";
 
@@ -26,11 +25,25 @@ export const templates = {
 // mount), and a long-lived client would pin whatever was valid at boot.
 const smtpConfig = () => (config as any).smtp;
 
+// nodemailer is imported lazily, and only when SMTP is actually configured.
+// As a top-level import it took the whole server down when the package was
+// missing: lib/mail is pulled in by routes/users, lib/notifications and the
+// withdraw breaker, so `Cannot find package 'nodemailer'` became a boot
+// failure. That's a wildly disproportionate outcome for an optional transport
+// — and it happens in practice, because the container's node_modules is a
+// named docker volume, so a dependency added to package.json isn't present
+// until `bun install` runs INSIDE the container.
 let transport: any;
-const smtpTransport = () => {
+let nodemailerUnavailable = false;
+
+const smtpTransport = async () => {
   const s = smtpConfig();
   if (!s?.host) return null;
-  if (!transport)
+  if (transport) return transport;
+  if (nodemailerUnavailable) return null;
+
+  try {
+    const nodemailer = (await import("nodemailer")).default;
     transport = nodemailer.createTransport({
       host: s.host,
       port: s.port || 587,
@@ -38,7 +51,17 @@ const smtpTransport = () => {
       secure: s.secure ?? (s.port === 465),
       auth: s.user ? { user: s.user, pass: s.pass } : undefined,
     });
-  return transport;
+    return transport;
+  } catch (e: any) {
+    // Try once, then stop: this is on the path of every outgoing message.
+    nodemailerUnavailable = true;
+    err(
+      "smtp configured but nodemailer could not be loaded — falling back to ses.",
+      "run `bun install` inside the app container.",
+      e.message,
+    );
+    return null;
+  }
 };
 
 const from = () => smtpConfig()?.from || `"Coinos " <${config.support}>`;
@@ -51,7 +74,7 @@ const send = async ({
   html,
   text,
 }: { to: string; subject: string; html?: string; text?: string }) => {
-  const smtp = smtpTransport();
+  const smtp = await smtpTransport();
   if (smtp) {
     await smtp.sendMail({ from: from(), to, subject, html, text });
     return;
@@ -83,7 +106,7 @@ export const alert = async (subject: string, body: string) => {
   const to = (config as any).alertEmail || config.support;
   try {
     if (!to) return warn("alert: no alertEmail or support address configured", subject);
-    l("sending alert", subject, smtpTransport() ? "via smtp" : "via ses");
+    l("sending alert", subject, (await smtpTransport()) ? "via smtp" : "via ses");
     await send({ to, subject, text: body });
   } catch (e: any) {
     err("failed to send alert", subject, e.message);
