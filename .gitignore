@@ -42,3 +42,4 @@ logs/
 # peerswap runtime artifacts
 /peerswap/
 CLAUDE.md
+locks/

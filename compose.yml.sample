@@ -52,10 +52,15 @@ services:
       # that check silently never fires, since the path simply doesn't exist.
       #
       # Point the host side OUTSIDE the repo. `./` is already mounted at
-      # /home/bun/app, so a lock dir inside it is writable by anything that can
-      # reach the app directory — which defeats the reason this lives in the
-      # filesystem rather than the db: it is meant to survive a db-write
-      # compromise. Create it first: mkdir -p /srv/coinos-locks
+      # /home/bun/app, so a `./locks` here would ALSO appear inside the
+      # container at /home/bun/app/locks, writable by the app process (it has
+      # to be, for bun --hot). Anyone with code execution in the container
+      # could then delete ALL.locked and reopen withdrawals — the exact
+      # scenario this is for. Keeping it outside the repo means the app can
+      # only read it, never clear it, and a stray `git clean -fd` in the
+      # checkout can't take it either.
+      #
+      # Create it first: mkdir -p /srv/coinos-locks
       - /srv/coinos-locks:/locks
     restart: always
   bc:
