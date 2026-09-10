@@ -67,8 +67,11 @@ const smtpTransport = async () => {
 const from = () => smtpConfig()?.from || `"Coinos " <${config.support}>`;
 
 // Send one message. Throws on failure — the callers below decide whether that
-// should be swallowed, and they both do, for different reasons.
-const send = async ({
+// should be swallowed, and they both do, for different reasons. Exported so
+// scripts/test-alert.ts can get at the real error: going through alert() means
+// failures are swallowed and logged via pino, which a script cannot reliably
+// detect, so a broken transport read as success.
+export const send = async ({
   to,
   subject,
   html,
