@@ -74,15 +74,6 @@ PUB4=$(curl -s -4 --max-time 10 ifconfig.me || true)
 [[ -n "$PUB4" ]] || die "could not determine the public IPv4 address"
 say "   public IPv4: $PUB4"
 
-# Postfix refuses a myhostname that is not fully qualified, and it reports that
-# by exiting non-zero from `postfix check` with NO message at all — so catch it
-# here where the cause can be stated. `hostname -f` returns a bare name on a
-# host with no domain configured (and inside a container).
-[[ "$MYHOSTNAME" == *.* ]] || die \
-  "MYHOSTNAME is '$MYHOSTNAME', which is not fully qualified — postfix requires a FQDN.
-       Set the system hostname properly, or pass one:  MYHOSTNAME=mail.$DOMAIN $0 --apply"
-say "   hostname is fully qualified: $MYHOSTNAME"
-
 # Port 25 egress. Most providers block it silently; without it nothing can be
 # delivered directly and the rest of this is pointless.
 if timeout 10 bash -c 'exec 3<>/dev/tcp/gmail-smtp-in.l.google.com/25; head -c 3 <&3' 2>/dev/null | grep -q 220; then
@@ -103,6 +94,26 @@ else
   else
     say "   WARNING: $PTR resolves to '${FWD:-nothing}', not $PUB4 — receivers will reject"
   fi
+fi
+
+# Postfix refuses a myhostname that is not fully qualified, and reports it by
+# exiting non-zero from `postfix check` with NO message at all — so catch it
+# here where the cause can be stated. `hostname -f` returns a bare name on a
+# host with no domain set (and inside a container).
+#
+# Suggest the PTR name rather than something under $DOMAIN: postfix HELOs as
+# myhostname, and receivers prefer that to match reverse DNS. The PTR already
+# forward-confirms, so using it is consistent for free, whereas a name under
+# $DOMAIN needs the provider to change the PTR as well. It makes no difference
+# to DMARC either way — alignment is about the envelope and From domains.
+if [[ "$MYHOSTNAME" != *.* ]]; then
+  die "MYHOSTNAME is '$MYHOSTNAME', which is not fully qualified — postfix requires a FQDN.
+       Re-run with the name this host's reverse DNS already points at:
+         sudo env MYHOSTNAME=${PTR:-mail.$DOMAIN} $0 --apply"
+fi
+say "   hostname is fully qualified: $MYHOSTNAME"
+if [[ -n "$PTR" && "$MYHOSTNAME" != "$PTR" ]]; then
+  say "   NOTE: HELO name differs from reverse DNS ($PTR) — some receivers penalise that"
 fi
 
 # ------------------------------------------------------------------ install
