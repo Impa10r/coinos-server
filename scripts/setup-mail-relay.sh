@@ -118,9 +118,18 @@ fi
 
 # ------------------------------------------------------------------ install
 step "packages"
-if command -v postconf >/dev/null && command -v opendkim >/dev/null; then
-  say "   postfix and opendkim already installed"
+# Check every binary actually used, not just one per package. Guarding on
+# `opendkim` alone skipped opendkim-tools on a host that already had the
+# daemon — leaving opendkim-testkey missing, which is the one command that
+# verifies the published DNS key matches the private one.
+MISSING=()
+for b in postconf opendkim opendkim-genkey opendkim-testkey host; do
+  command -v "$b" >/dev/null || MISSING+=("$b")
+done
+if [[ ${#MISSING[@]} -eq 0 ]]; then
+  say "   postfix, opendkim and tools already installed"
 else
+  say "   missing: ${MISSING[*]}"
   run apt-get update -qq
   # Preseed so postfix does not open an interactive configuration dialog.
   if [[ $APPLY -eq 1 ]]; then
@@ -245,7 +254,10 @@ say "3. DMARC — leave as is. p=reject with strict alignment is correct, and"
 say "   this setup is what finally satisfies it."
 
 step "verify, once DNS has propagated"
-say "   opendkim-testkey -d $DOMAIN -s $SELECTOR -vvv     # key matches DNS"
+# sudo, because opendkim-testkey lives in /usr/sbin, which Debian keeps off a
+# non-root user's PATH — without it the command reads as "not found" on a host
+# where the package is perfectly well installed.
+say "   sudo opendkim-testkey -d $DOMAIN -s $SELECTOR -vvv   # key matches DNS"
 say "   docker exec -it app bun scripts/test-alert.ts     # from the app host"
 say "   then check the received headers show: spf=pass dkim=pass dmarc=pass"
 say ""
