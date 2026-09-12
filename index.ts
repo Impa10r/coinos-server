@@ -66,11 +66,11 @@ announceFips();
 setInterval(announceFips, 3600 * 1000);
 setInterval(sendHeartbeat, 2000);
 
-// Admin-gated: this reports the node's channel, onchain and ecash balances
-// — precisely what an attacker probing for a drain wants, and it was
-// unauthenticated with no consumer in the UI. If an external monitor needs it,
-// give that monitor an admin token rather than reopening it to everyone.
-app.get("/balances", admin, info.balances);
+// GET /balances removed. It reported the node's channel balance, onchain
+// wallet and ecash total — what someone probing for a drain wants to know —
+// and it was unauthenticated. Nothing consumed it: no reference anywhere in
+// coinos-ui or this repo, it predates the bun switch, and the `mon` container
+// reads CLN directly with its own rune. A debugging endpoint nobody removed.
 app.get("/health", info.health);
 app.post("/email", email.send);
 

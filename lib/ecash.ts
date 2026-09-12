@@ -57,13 +57,25 @@ export async function get(id) {
   return token;
 }
 
+// Proofs currently held, or none. getDecodedToken() throws on anything that
+// isn't a token — including null, where cashu-ts calls .startsWith on it and
+// yields the opaque "null is not an object (evaluating 'n.startsWith')". The
+// `cash` key is simply unset until this instance first holds ecash, so an
+// unguarded read made the FIRST claim or mint fail rather than starting from
+// an empty balance.
+const currentProofs = async () => {
+  const token = await g("cash");
+  if (!token) return [];
+  return getDecodedToken(token).proofs ?? [];
+};
+
 export async function claim(token) {
   const { mint } = getDecodedToken(token);
 
   if (await ext(mint)) fail("Unable to receive from other mints");
 
   return withCashLock(async () => {
-    const { proofs: current } = getDecodedToken(await g("cash"));
+    const current = await currentProofs();
     const rcvd = await w.receive(token);
     await s("cash", enc([...current, ...rcvd]));
     return rcvd.reduce((a, b) => a + b.amount, 0);
@@ -74,7 +86,7 @@ export async function mint(amount) {
   const { keysets } = await m.getKeySets();
   const w = new CashuWallet(m, { keysets });
   return withCashLock(async () => {
-    const { proofs } = getDecodedToken(await g("cash"));
+    const proofs = await currentProofs();
     const { send, keep } = await w.send(amount, proofs);
     const rcvd = await w.receive(enc(send));
     const change = enc(keep);
