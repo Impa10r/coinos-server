@@ -66,7 +66,11 @@ announceFips();
 setInterval(announceFips, 3600 * 1000);
 setInterval(sendHeartbeat, 2000);
 
-app.get("/balances", info.balances);
+// Admin-gated: this reports the node's channel, onchain and ecash balances
+// — precisely what an attacker probing for a drain wants, and it was
+// unauthenticated with no consumer in the UI. If an external monitor needs it,
+// give that monitor an admin token rather than reopening it to everyone.
+app.get("/balances", admin, info.balances);
 app.get("/health", info.health);
 app.post("/email", email.send);
 

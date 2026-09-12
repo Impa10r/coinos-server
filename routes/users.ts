@@ -887,7 +887,15 @@ export default {
   async del(c) {
     let username = c.req.param("username");
     const authorization = c.req.header("authorization");
-    fail("Unauthorized");
+    // Disabled. It threw, which escaped to app.onError as an "unhandled error"
+    // 500 — noise in the logs, and a 500 tells a prober the route exists and
+    // does something. Answer like an unregistered route instead, matching what
+    // the admin reset endpoint already does. Everything below is unreachable
+    // and kept only as a record of what it used to do.
+    return c.json(
+      { message: "Route GET:/users/delete not found", error: "Not Found", statusCode: 404 },
+      404,
+    );
     username = username.toLowerCase();
     if (!authorization?.includes(config.admin)) return c.json("unauthorized", 401);
 
@@ -1190,12 +1198,20 @@ export default {
     const id = c.req.param("id");
     const { id: uid } = c.get("user");
 
-    const pos = await db.lPos(`${uid}:accounts`, id);
-    if (pos == null) fail("account not found");
+    try {
+      // An id the caller doesn't own is a 404, not an "unhandled error" 500 —
+      // it escaped to app.onError before, which both logged it as a server
+      // fault and returned a bare {ok:false}.
+      const pos = await db.lPos(`${uid}:accounts`, id);
+      if (pos == null) return c.json("account not found", 404);
 
-    const account = await g(`account:${id}`);
-    if (account) account.balance = await getBalance(id);
-    return c.json(account);
+      const account = await g(`account:${id}`);
+      if (account) account.balance = await getBalance(id);
+      return c.json(account);
+    } catch (e: any) {
+      warn("account failed", id, e.message);
+      return bail(c, e.message);
+    }
   },
 
   async accounts(c) {

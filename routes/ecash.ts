@@ -83,7 +83,9 @@ export default {
     const body = await c.req.json();
     const user = c.get("user");
     const amount = parseInt(body.amount);
-    fail("disabled");
+    // Disabled. fail() here escaped to app.onError as an "unhandled error"
+    // 500; say so properly instead. The line below is unreachable.
+    return c.json({ error: "Minting is disabled" }, 503);
     return c.json(await sendCash({ amount, user }));
   },
 
