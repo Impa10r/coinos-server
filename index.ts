@@ -281,13 +281,12 @@ app.post("/mint", auth, ecash.mint);
 app.post("/melt", auth, ecash.melt);
 app.post("/ecash/:id", ecash.receive);
 
-app.get("/replay/:index", (c) => {
-  // Unauthenticated ops-only reconciliation trigger — the double-credit race
-  // it could cause is now closed by credit()'s SET NX guard, but there's no
-  // reason to leave it open to the public internet regardless.
-  // replay(c.req.param("index"));
-  return c.json({});
-});
+// GET /replay/:index removed. It was an unauthenticated ops-only
+// reconciliation trigger, already neutered — the handler body was commented
+// out and it returned {} — but left mapped to a URL. A route that exists and
+// does nothing is still a route: it answers 200 to a prober, and the next
+// person to read it has to work out whether the commented line is a todo.
+// lib/lightning.ts still exports replay() for deliberate use.
 
 const host_: string = process.env["HOST"] || "0.0.0.0";
 const port: number = Number.parseInt(process.env["PORT"]) || 3119;
