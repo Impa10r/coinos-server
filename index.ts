@@ -153,10 +153,21 @@ app.get("/square/connect", auth, square.connect);
 app.get("/square/auth", auth, square.auth);
 app.post("/square/payment", square.payment);
 
-app.get("/lnurl/proxy", lnurl.proxy);
+// Unauthenticated by design — the /ln/<lnurl> page fetches through it before
+// the user has done anything — which also makes it a free URL fetcher on this
+// server's IP for anyone who finds it. lib/safe-fetch.ts stops it reaching
+// internal addresses (resolves first, connects to the validated IP, so DNS
+// rebinding can't slip past, and re-checks every redirect), so the exposure is
+// outbound requests rather than internal access. Rate limit it so it can't be
+// used for bulk scanning or as a clearnet->Tor relay: production logs show it
+// being walked with /.env, example.com and a list of .onion hosts.
+app.get(
+  "/lnurl/proxy",
+  routeRateLimit({ max: 30, windowMs: 10000, keyPrefix: "lnurlproxy" }),
+  lnurl.proxy,
+);
 app.get("/encode", lnurl.encode);
 app.get("/decode", lnurl.decode);
-app.get("/lnurl/proxy", lnurl.proxy);
 app.get("/lnurl/verify/:id", lnurl.verify);
 app.get("/lnurlp/:username", lnurl.lnurlp);
 app.get("/lnurl/:id", lnurl.lnurl);
