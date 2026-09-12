@@ -118,8 +118,12 @@ export const alert = async (subject: string, body: string) => {
 
 export const mail = async (user, subject, template, params) => {
   try {
-    l("sending mail", user.username, subject);
-    if (!user.email) return;
+    // Record the transport, as alert() does. Without it a delivery complaint
+    // is undiagnosable from the logs: SMTP and the SES fallback look
+    // identical, so "sent, never arrived" can't be separated from "went out
+    // over a transport you thought was retired".
+    l("sending mail", user.username, subject, (await smtpTransport()) ? "via smtp" : "via ses");
+    if (!user.email) return warn("sending mail: no address for", user.username, subject);
 
     const source = fs.readFileSync(template, "utf8");
     const html = handlebars.compile(source)(params);
