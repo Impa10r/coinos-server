@@ -229,6 +229,26 @@ EOF
 fi
 say "   wrote /etc/opendkim.conf (socket 127.0.0.1:8891)"
 
+# ----------------------------------------------------------------- firewall
+step "firewall"
+# A DROP rule looks exactly like a routing failure: the port listens, the
+# connection times out rather than being refused, and nothing is logged on
+# either side. Worth opening explicitly rather than leaving it to be diagnosed.
+#
+# Only ever ADD a rule, and only when ufw is already active. Enabling a
+# firewall on a remote host from a script is how people lock themselves out of
+# SSH, and that is not this script's business.
+if ! command -v ufw >/dev/null; then
+  say "   ufw not installed — if another firewall is in use, allow 587/tcp from $WG_SUBNET"
+elif ! ufw status 2>/dev/null | grep -q "Status: active"; then
+  say "   ufw installed but inactive — not enabling it; nothing to do"
+elif ufw status 2>/dev/null | grep -q "587.*$WG_SUBNET"; then
+  say "   ufw already allows 587/tcp from $WG_SUBNET"
+else
+  run ufw allow from "$WG_SUBNET" to any port 587 proto tcp
+  say "   allowed 587/tcp from $WG_SUBNET (tunnel only — nothing public)"
+fi
+
 step "restart"
 soft systemctl enable --now opendkim
 soft systemctl restart opendkim
