@@ -189,9 +189,16 @@ app.use("*", async (c, next) => {
     "/contacts",
   ];
 
+  // Match a whole path segment, not a raw prefix. `startsWith` silently ate
+  // any route beginning with one of these strings — /melt was excluded from
+  // the request log entirely because "/melt".startsWith("/me"), and that
+  // endpoint moves money. Every intended entry still matches: "/public" still
+  // covers /public/x, "/lnurlp" still covers /lnurlp/alice.
+  const ignored = (path: string) => url === path || url.startsWith(`${path}/`);
+
   const shouldLog =
-    !ignore.some((path) => url.startsWith(path)) &&
-    !(c.req.method === "GET" && url.startsWith("/users"));
+    !ignore.some(ignored) &&
+    !(c.req.method === "GET" && (url === "/users" || url.startsWith("/users/")));
 
   if (shouldLog) {
     const xff = c.req.header("x-forwarded-for");
