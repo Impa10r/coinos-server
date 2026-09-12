@@ -26,6 +26,7 @@ import {
   generatePasskeyLogin,
   verifyPasskeyLogin,
 } from "$lib/passkey";
+import { isReserved } from "$lib/reserved";
 import register from "$lib/register";
 import { emit } from "$lib/sockets";
 import upload from "$lib/upload";
@@ -355,10 +356,8 @@ export default {
 
       const { confirm, password, pin, newpin } = body;
       const username = body?.username?.toLowerCase().replace(/\s/g, "");
-      const reserved = ["ecash"];
       const valid = /^[\p{L}\p{N}]{2,24}$/u;
       if (!valid.test(username)) fail("Usernames can only have letters and numbers");
-      if (reserved.includes(username)) fail("Invalid username");
       if (username?.includes("undefined")) fail("Invalid username");
 
       let exists;
@@ -406,6 +405,16 @@ export default {
       if (username) {
         const currentUsername = user.username.replace(/\s/g, "").toLowerCase();
         if (username !== currentUsername) {
+          // Only on an actual CHANGE. Checking up front alongside the format
+          // rules would reject the accounts that legitimately hold these names
+          // — mint, coinos, config.admin — the moment they saved any profile
+          // edit, since the body echoes their current username.
+          //
+          // Renaming into a reserved name matters as much as registering one:
+          // production logs show an account called "min" attempting exactly
+          // that against "mint", which routes/ecash.ts treats as authorization.
+          if (isReserved(username)) fail("Invalid username");
+
           exists = await db.exists(`user:${username}`);
 
           if (exists) {

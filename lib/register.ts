@@ -3,6 +3,7 @@ import countries from "$lib/countries";
 import { db } from "$lib/db";
 import { l, warn } from "$lib/logging";
 import { createBalanceAccount, createCreditAccounts } from "$lib/tb";
+import { isReserved } from "$lib/reserved";
 import { fail } from "$lib/utils";
 import { bytesToHex, randomBytes } from "@noble/hashes/utils.js";
 import { got } from "got";
@@ -16,11 +17,10 @@ export default async (user, ip) => {
   let { password, pubkey, username } = user;
   l("registering", username);
 
-  const reserved = ["ecash"];
   if (!username) fail("Username required");
   username = username.toLowerCase().replace(/\s/g, "");
   if (!valid.test(username)) fail("Usernames can only have letters and numbers");
-  if (reserved.includes(username)) fail("Invalid username");
+  if (isReserved(username)) fail("Invalid username");
   if (username.includes("undefined")) fail("Invalid username");
 
   const id = v4();
