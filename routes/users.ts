@@ -1128,7 +1128,13 @@ export default {
     const { id } = user;
 
     try {
-      if (await g(`email:${email.toLowerCase()}`)) fail("Email already in use");
+      // Refuse only if the address belongs to SOMEONE ELSE. It maps to a uid,
+      // and verify() writes that mapping — so re-submitting your OWN verified
+      // address was rejected as "already in use" by you. That is reachable
+      // whenever an account needs to re-verify an address it already holds,
+      // which the unverify-on-save bug made routine.
+      const owner = await g(`email:${email.toLowerCase()}`);
+      if (owner && owner !== id) fail("Email already in use");
 
       const { username } = user;
 
@@ -1152,6 +1158,10 @@ export default {
 
       return c.json({ ok: true });
     } catch (e) {
+      // Log it. This was the only handler in the verification path that failed
+      // silently, so a refused request showed the user an error with nothing
+      // on the server side to explain it.
+      warn("email verification request failed", user?.username, email, e.message);
       return bail(c, e.message);
     }
   },
