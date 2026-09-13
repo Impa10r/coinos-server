@@ -479,8 +479,15 @@ export default {
       const submittedEmail = (body.email ?? "").trim().toLowerCase();
       const currentEmail = (user.email ?? "").trim().toLowerCase();
       if (typeof body.email !== "undefined" && submittedEmail !== currentEmail) {
-        user.verified = false;
-        user.notify = false;
+        // An address this account has ALREADY verified stays verified. The
+        // email:<addr> -> uid mapping verify() writes survives the address
+        // being removed from the profile, so re-adding one you previously
+        // confirmed is a restore, not a new claim — there is nothing left to
+        // prove and no reason to send another link.
+        const owner = submittedEmail ? await g(`email:${submittedEmail}`) : null;
+        const restored = !!owner && owner === user.id;
+        user.verified = restored;
+        if (!restored) user.notify = false;
       }
 
       for (const a of attributes) {
@@ -1135,6 +1142,14 @@ export default {
       // which the unverify-on-save bug made routine.
       const owner = await g(`email:${email.toLowerCase()}`);
       if (owner && owner !== id) fail("Email already in use");
+      if (owner === id) {
+        // Already confirmed by this account. Sending another link would ask
+        // the user to re-prove something they have already proved, and the
+        // settings page requests one on any address change — including
+        // re-adding the address they just removed.
+        l("email already verified, no link sent", user.username, email);
+        return c.json({ ok: true, verified: true });
+      }
 
       const { username } = user;
 
