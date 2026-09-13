@@ -225,6 +225,14 @@ KeyFile                 $KEYDIR/$SELECTOR.private
 Canonicalization        relaxed/simple
 Mode                    s
 SubDomains              no
+# THE LINE THAT DECIDES WHETHER ANYTHING GETS SIGNED. OpenDKIM signs mail from
+# hosts it considers internal and merely verifies mail from everyone else, and
+# the default internal list is 127.0.0.1 alone. Mail reaching us comes from the
+# relay across WireGuard (10.9.0.2), so without this it was treated as external
+# and left unsigned — and because milter_default_action is accept, it went out
+# anyway with no error. Gmail then showed spf=pass and dmarc=pass with no dkim
+# line at all, which is easy to read as success.
+InternalHosts           127.0.0.1, ::1, $WG_SUBNET
 EOF
 fi
 say "   wrote /etc/opendkim.conf (socket 127.0.0.1:8891)"
