@@ -467,7 +467,18 @@ export default {
         "twofa",
       ];
 
-      if (body.email) {
+      // Only when the address actually CHANGES. This was a presence check, and
+      // the settings form submits the email field on every save — so toggling
+      // notifications, or editing anything else on that page, cleared
+      // `verified` on an address that had not changed.
+      //
+      // Nothing restored it, either: the UI only requests a new verification
+      // link when the address differs from the stored one, so the account was
+      // left permanently unverified with no route back short of changing the
+      // email to something else and back again.
+      const submittedEmail = body.email?.trim().toLowerCase();
+      const currentEmail = user.email?.trim().toLowerCase();
+      if (submittedEmail && submittedEmail !== currentEmail) {
         user.verified = false;
         user.notify = false;
       }
