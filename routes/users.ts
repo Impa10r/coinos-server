@@ -476,9 +476,9 @@ export default {
       // link when the address differs from the stored one, so the account was
       // left permanently unverified with no route back short of changing the
       // email to something else and back again.
-      const submittedEmail = body.email?.trim().toLowerCase();
-      const currentEmail = user.email?.trim().toLowerCase();
-      if (submittedEmail && submittedEmail !== currentEmail) {
+      const submittedEmail = (body.email ?? "").trim().toLowerCase();
+      const currentEmail = (user.email ?? "").trim().toLowerCase();
+      if (typeof body.email !== "undefined" && submittedEmail !== currentEmail) {
         user.verified = false;
         user.notify = false;
       }
@@ -491,6 +491,16 @@ export default {
             if (match) user.profile = match[1];
           }
         }
+      }
+
+      // Notifications need somewhere to go. Enforced AFTER the attributes loop
+      // above, which applies body.notify — a form that clears the address
+      // while leaving the toggle on would otherwise leave notify=true with no
+      // address, and mail() then returns without sending anything. Also covers
+      // an account that never set an address at all.
+      if (!user.email) {
+        user.notify = false;
+        user.verified = false;
       }
 
       user.fresh = false;
