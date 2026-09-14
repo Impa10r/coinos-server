@@ -19,6 +19,12 @@ const fiveMinutes = 1000 * 60 * 5;
 
 const proxyAgent = LNURL_PROXY ? new SocksProxyAgent(LNURL_PROXY) : undefined;
 
+// Every lnurl callback id we hand out is a v4 from lnurlp()/pay(), so an id
+// that isn't one can only be a guess. Production logs show /api/lnurl/withdraw
+// being walked repeatedly; each hit cost a redis lookup and left an info plus a
+// warn line, which is a scanner setting the pace of our own log stream.
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // v3 payment addresses (coinos v3 / halwallet) are registered here. Opt-in
 // only — no hardcoded default — so a fork/self-hosted instance that isn't
 // part of the coinos v3 migration doesn't pay a registrar round-trip (and a
@@ -181,6 +187,14 @@ export default {
     const amount = c.req.query("amount");
     const comment = c.req.query("comment");
     const nostr = c.req.query("nostr");
+
+    // Answer a guessed id before touching redis, with the exact response the
+    // lookup would have produced anyway, so a prober learns nothing new.
+    if (!uuid.test(id ?? "")) {
+      l("lnurl callback probe", id);
+      return bail(c, "user not found");
+    }
+
     l(
       "lnurl callback",
       id,
@@ -296,11 +310,24 @@ export default {
       if (storedFundId !== fundId)
         return c.json({ status: "ERROR", reason: "Invalid or expired k1" });
 
-      await db.del(`lnurlw:${k1}`);
+      // Claim the k1 atomically. The read above is not the claim: two callbacks
+      // arriving together with the same k1 both saw it, both passed, and both
+      // debited the fund — a single-use withdraw token paying twice whenever
+      // the fund covered both invoices. DEL returns 1 to exactly one caller,
+      // so the loser stops here. Deliberately not restored on payment failure:
+      // the holder can request a fresh k1, and re-arming a spent token reopens
+      // the same window.
+      if (!(await db.del(`lnurlw:${k1}`)))
+        return c.json({ status: "ERROR", reason: "Invalid or expired k1" });
 
       const decoded = await ln.decode(pr);
-      const amount = Math.round(decoded.amount_msat / 1000);
-      if (amount <= 0) fail("Invalid invoice amount");
+      const amount = Math.round(decoded?.amount_msat / 1000);
+      // An amountless invoice, or anything ln.decode couldn't read, leaves
+      // amount_msat undefined -> NaN, and NaN fails every comparison below:
+      // `NaN <= 0` and `NaN > balance` are both false, so it sailed past the
+      // amount and balance checks into tbFundDebit. BigInt(NaN) threw there,
+      // which is the only reason this wasn't worse than a confusing log line.
+      if (!Number.isFinite(amount) || amount <= 0) fail("Invalid invoice amount");
 
       const balance = await getFundBalance(fundId);
       if (amount > balance)

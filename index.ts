@@ -175,8 +175,22 @@ app.get("/decode", lnurl.decode);
 app.get("/lnurl/verify/:id", lnurl.verify);
 app.get("/lnurlp/:username", lnurl.lnurlp);
 app.get("/lnurl/:id", lnurl.lnurl);
-app.get("/lnurlw/:fundId", lnurl.lnurlw);
-app.get("/lnurlw/:fundId/callback", lnurl.lnurlwCallback);
+// Unauthenticated by design — a fund is withdrawable by anyone with the link.
+// A real withdrawal is one request to each: fetch the withdrawRequest, then
+// call back once with the k1. Rate limit both, because each /lnurlw hit mints
+// a redis k1 key with a 5 minute TTL, and because callbacks arrive in bursts
+// only when someone is poking at the flow rather than using it (production
+// logs show four in six seconds, all missing k1 and pr).
+app.get(
+  "/lnurlw/:fundId",
+  routeRateLimit({ max: 10, windowMs: 10000, keyPrefix: "lnurlw" }),
+  lnurl.lnurlw,
+);
+app.get(
+  "/lnurlw/:fundId/callback",
+  routeRateLimit({ max: 10, windowMs: 10000, keyPrefix: "lnurlwcb" }),
+  lnurl.lnurlwCallback,
+);
 app.get("/pay/:username", lnurl.pay);
 app.get("/pay/:username/:amount", lnurl.pay);
 
