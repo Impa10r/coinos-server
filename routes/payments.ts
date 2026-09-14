@@ -1031,7 +1031,9 @@ export default {
 
       const { username } = user;
 
-      mqtt.publish(username, `pay:${p.amount}:${p.tip}:${p.rate}:${p.created}:${p.id}`);
+      mqtt.publish(username, `pay:${p.amount}:${p.tip}:${p.rate}:${p.created}:${p.id}`, {
+        qos: 1,
+      });
 
       return c.json({ ok: true });
     } catch (e) {
