@@ -45,11 +45,42 @@ const withCashLock = async <T>(fn: () => Promise<T>): Promise<T> => {
   }
 };
 
-const ext = async (mint) => {
-  const issuer = new CashuMint(mint);
-  const { pubkey: issuerPk } = await issuer.getInfo();
-  const { pubkey: ourPk } = await m.getInfo();
-  return issuerPk !== ourPk;
+// Is this token from someone else's mint?
+//
+// This used to answer by CONNECTING to the mint named in the token and
+// comparing its pubkey to ours. The mint URL comes from inside a token the
+// caller supplies, and both /cash routes are unauthenticated, so that made the
+// server into an HTTP client pointed wherever an anonymous caller liked —
+// 127.0.0.1, the wireguard subnet, bitcoind, the mail relay — with the failure
+// text handed back in the 500, which distinguishes an open port from a closed
+// one. Production logs showed it being exercised: repeated "Unable to connect.
+// Is the computer able to access the url?" is cashu-ts failing to reach a URL
+// someone chose.
+//
+// A URL comparison answers the same question without dialling anything. Every
+// token this server issues is encoded with config.mintUrl verbatim (see enc()
+// above), so "the URL is ours" and "the mint is ours" are the same statement.
+// Routing the old call through safe-fetch was the other option, but that only
+// blocks internal targets — it would leave an anonymous outbound fetcher on
+// every external address, which is not something this needs at all.
+const norm = (u: string) =>
+  String(u ?? "")
+    .trim()
+    .replace(/\/+$/, "")
+    .toLowerCase();
+const ext = (mint) => norm(mint) !== norm(config.mintUrl);
+
+// getDecodedToken() throws opaquely on anything that isn't a token string: null
+// gives "null is not an object (evaluating 'n.startsWith')", which is what a
+// burst of six context-free error lines turned out to be. Fail with something
+// an operator can read, and do it in one place so every entry point gets it.
+const decode = (token) => {
+  if (typeof token !== "string" || !token) fail("Invalid token");
+  try {
+    return getDecodedToken(token);
+  } catch (e: any) {
+    throw new Error(`Invalid token: ${e.message}`);
+  }
 };
 
 export async function get(id) {
@@ -57,22 +88,19 @@ export async function get(id) {
   return token;
 }
 
-// Proofs currently held, or none. getDecodedToken() throws on anything that
-// isn't a token — including null, where cashu-ts calls .startsWith on it and
-// yields the opaque "null is not an object (evaluating 'n.startsWith')". The
-// `cash` key is simply unset until this instance first holds ecash, so an
-// unguarded read made the FIRST claim or mint fail rather than starting from
-// an empty balance.
+// Proofs currently held, or none. The `cash` key is simply unset until this
+// instance first holds ecash, so an unguarded read made the FIRST claim or
+// mint fail (see decode() above) rather than starting from an empty balance.
 const currentProofs = async () => {
   const token = await g("cash");
   if (!token) return [];
-  return getDecodedToken(token).proofs ?? [];
+  return decode(token).proofs ?? [];
 };
 
 export async function claim(token) {
-  const { mint } = getDecodedToken(token);
+  const { mint } = decode(token);
 
-  if (await ext(mint)) fail("Unable to receive from other mints");
+  if (ext(mint)) fail("Unable to receive from other mints");
 
   return withCashLock(async () => {
     const current = await currentProofs();
@@ -96,10 +124,10 @@ export async function mint(amount) {
 }
 
 export async function check(token) {
-  const { mint, proofs } = getDecodedToken(token);
+  const { mint, proofs } = decode(token);
   const total = proofs.reduce((a, b) => a + b.amount, 0);
 
-  const external = await ext(mint);
+  const external = ext(mint);
 
   let spent = 0;
   for (const [i, p] of (await w.checkProofsStates(proofs)).entries()) {

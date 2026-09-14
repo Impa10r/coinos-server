@@ -1,10 +1,10 @@
 import { db, g, s } from "$lib/db";
 import { check, claim, get, mint } from "$lib/ecash";
-import { err, l } from "$lib/logging";
+import { l, warn } from "$lib/logging";
 import { credit, debit } from "$lib/payments";
 import { emit } from "$lib/sockets";
 import { tbDebit } from "$lib/tb";
-import { bail, fail, getInvoice } from "$lib/utils";
+import { bail, fail, getClientIp, getInvoice } from "$lib/utils";
 import { getEncodedToken } from "@cashu/cashu-ts";
 import { v4 } from "uuid";
 
@@ -35,7 +35,7 @@ export default {
       await s(`cash:${id}`, token);
       return c.json({ id });
     } catch (e) {
-      err(e.message);
+      warn("cash save failed", getClientIp(c) ?? "unknown", e.message);
       return bail(c, e.message);
     }
   },
@@ -44,10 +44,21 @@ export default {
     const id = c.req.param("id");
     try {
       const token = await get(id);
+      // Unset id — the common case when someone is walking ids rather than
+      // following a link they were given. This used to fall through to
+      // check(null) and surface cashu-ts's "null is not an object (evaluating
+      // 'n.startsWith')" as a 500, which says nothing to the caller and less
+      // to us.
+      if (!token) {
+        l("cash miss", id, getClientIp(c) ?? "unknown");
+        return c.json({ error: "Not found" }, 404);
+      }
       const status = await check(token);
       return c.json({ token, status });
     } catch (e) {
-      err(e.message);
+      // Context, because this route is unauthenticated and every failure here
+      // used to log as a bare library message with no route, id, or caller.
+      warn("cash get failed", id, getClientIp(c) ?? "unknown", e.message);
       return bail(c, e.message);
     }
   },
@@ -74,7 +85,7 @@ export default {
 
       return c.json({ ok: true });
     } catch (e) {
-      err(e.message);
+      warn("cash claim failed", user?.username, e.message);
       return bail(c, e.message);
     }
   },
@@ -151,7 +162,7 @@ export default {
 
       return c.json({ id });
     } catch (e) {
-      err(e.message);
+      warn("ecash receive failed", c.req.param("id"), getClientIp(c) ?? "unknown", e.message);
       return bail(c, e.message);
     }
   },
