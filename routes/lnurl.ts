@@ -4,7 +4,7 @@ import ln from "$lib/ln";
 import { err, l, warn } from "$lib/logging";
 import { serverPubkey2 } from "$lib/nostr";
 import { getFundBalance, tbFundCredit, tbFundDebit } from "$lib/tb";
-import { SATS, bail, fail, getInvoice, getUser } from "$lib/utils";
+import { SATS, bail, fail, getClientIp, getInvoice, getUser } from "$lib/utils";
 import { bech32 } from "bech32";
 import { safeGot } from "$lib/safe-fetch";
 import { verifyEvent } from "nostr-tools";
@@ -336,7 +336,19 @@ export default {
       const result: any = await tbFundDebit(fundId, amount, "Insufficient funds");
       if (result.err) return c.json({ status: "ERROR", reason: result.err });
 
-      l("lnurlw paying invoice from fund", fundId, amount);
+      // Record who is taking the money, not just how much. A fund withdrawal
+      // is unauthenticated by design, so the destination node and the client
+      // IP are the only identity there is — and neither was kept, which left a
+      // drained fund with nothing to trace it by.
+      l(
+        "lnurlw paying invoice from fund",
+        fundId,
+        amount,
+        "to",
+        decoded?.payee ?? "unknown",
+        "ip",
+        getClientIp(c) ?? "unknown",
+      );
 
       try {
         await ln.xpay({

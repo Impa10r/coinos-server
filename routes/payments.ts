@@ -668,37 +668,48 @@ export default {
 
       const k = `fund:${id}:managers`;
 
-      let managers: any[] = [...(await db.sMembers(k))];
-      if (managers.length) {
-        if (!managers.includes(user.id)) fail("Unauthorized");
-      } else {
-        // No managers yet usually means this call is establishing a brand-new
-        // fund (the caller becomes its founding manager) — same unguessable-id
-        // requirement as the /payments fund-creation path above. But a fund
-        // can also predate that requirement or legitimately have real balance
-        // with no manager registered yet (a "bearer" fund) — only reject when
-        // BOTH signals agree this fund has never existed at all, so a
-        // grandfathered non-UUID fund can still register its first manager.
-        if (!isUuid(id) && (await getFundBalance(id)) === null) {
-          const ip = getClientIp(c);
-          err(`SECURITY: non-uuid fund name "${id}" by ${user.username}`);
-          await evictUser(user, `non-uuid fund name: ${id}`, ip);
-          fail("Invalid fund name");
-        }
-        await db.sAdd(k, user.id);
+      // Every check runs before any write. The target lookup below used to sit
+      // AFTER the founding-manager sAdd, so a mistyped username on a fund with
+      // no managers yet returned "User not found" and still left the caller
+      // registered as its sole manager. That silently converts a fund anyone
+      // with the link can withdraw from — take() only gates once managers
+      // exist — into one only the caller can touch, on a request that told the
+      // user it had failed.
+      const managers: any[] = [...(await db.sMembers(k))];
+      const founding = !managers.length;
+
+      if (!founding && !managers.includes(user.id)) fail("Unauthorized");
+
+      // No managers yet usually means this call is establishing a brand-new
+      // fund (the caller becomes its founding manager) — same unguessable-id
+      // requirement as the /payments fund-creation path above. But a fund
+      // can also predate that requirement or legitimately have real balance
+      // with no manager registered yet (a "bearer" fund) — only reject when
+      // BOTH signals agree this fund has never existed at all, so a
+      // grandfathered non-UUID fund can still register its first manager.
+      if (founding && !isUuid(id) && (await getFundBalance(id)) === null) {
+        const ip = getClientIp(c);
+        err(`SECURITY: non-uuid fund name "${id}" by ${user.username}`);
+        await evictUser(user, `non-uuid fund name: ${id}`, ip);
+        fail("Invalid fund name");
       }
 
       const u = await getUser(username, fields);
-      if (!u) fail("User not found");
+      // Name the target. The warn below reports the CALLER, so a bare "User
+      // not found" left no way to tell a typo from a lookup problem.
+      if (!u) fail(`User not found: ${username}`);
       const { id: uid } = u;
 
+      if (founding) await db.sAdd(k, user.id);
       await db.sAdd(k, uid);
 
+      // Always return the resolved list. This used to return the pre-write
+      // `managers` array whenever the fund already had managers — raw uids
+      // rather than user objects, and missing the person just added.
       const ids = [...(await db.sMembers(k))];
-      if (!managers.length)
-        managers = await Promise.all(ids.map(async (id) => await getUser(id, fields)));
+      const resolved = (await Promise.all(ids.map((i) => getUser(i, fields)))).filter(Boolean);
 
-      return c.json(managers);
+      return c.json(resolved);
     } catch (e: any) {
       warn("problem adding fund manager", user?.username, e.message);
       return bail(c, e.message);
