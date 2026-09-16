@@ -58,9 +58,9 @@ export const g = async (k) => {
   }
 };
 
-export const s = (k, v) => {
+export const s = (k, v, ttl?: number) => {
   if (k === "user:null" || k === "user:undefined") fail("null user");
-  return db.set(k, JSON.stringify(v));
+  return db.set(k, JSON.stringify(v), ttl ? { EX: ttl } : undefined);
 };
 
 export async function* scan(pattern: string) {
