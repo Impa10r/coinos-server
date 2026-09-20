@@ -51,6 +51,8 @@ const decode = async (token) => {
   try {
     return getDecodedToken(token, (await wallet()).keysets);
   } catch (e: any) {
+    if (/short keyset id/i.test(e.message))
+      fail("Unable to receive from other mints");
     throw new Error(`Invalid token: ${e.message}`);
   }
 };
@@ -108,28 +110,29 @@ const withCashLock = async <T>(fn: () => Promise<T>): Promise<T> => {
 
 // Is this token from someone else's mint?
 //
-// This used to answer by CONNECTING to the mint named in the token and
-// comparing its pubkey to ours. The mint URL comes from inside a token the
-// caller supplies, and both /cash routes are unauthenticated, so that made the
-// server into an HTTP client pointed wherever an anonymous caller liked —
-// 127.0.0.1, the wireguard subnet, bitcoind, the mail relay — with the failure
-// text handed back in the 500, which distinguishes an open port from a closed
-// one. Production logs showed it being exercised: repeated "Unable to connect.
-// Is the computer able to access the url?" is cashu-ts failing to reach a URL
-// someone chose.
+// Three answers have been tried here. Connecting to the mint named in the
+// token and comparing pubkeys made every /cash entry point an unauthenticated
+// SSRF — the URL comes from the caller, so an anonymous request could point
+// the server at 127.0.0.1, the wireguard subnet, bitcoind or the mail relay,
+// with the failure text returned in the 500 to tell open ports from closed.
+// Comparing that URL to config.mintUrl as a string stopped the dialling but
+// broke valid claims: the mint URL is a label the SENDING wallet writes in,
+// and tokens of ours come back carrying stray ports and paths, so a string
+// match rejects our own money.
 //
-// A URL comparison answers the same question without dialling anything. Every
-// token this server issues is encoded with config.mintUrl verbatim (see enc()
-// above), so "the URL is ours" and "the mint is ours" are the same statement.
-// Routing the old call through safe-fetch was the other option, but that only
-// blocks internal targets — it would leave an anonymous outbound fetcher on
-// every external address, which is not something this needs at all.
-const norm = (u: string) =>
-  String(u ?? "")
-    .trim()
-    .replace(/\/+$/, "")
-    .toLowerCase();
-const ext = (mint) => norm(mint) !== norm(config.mintUrl);
+// Keyset ids are derived from the mint's public keys, so they identify the
+// issuer cryptographically. A token whose proofs are all on our keysets is
+// ours whatever URL it names, and the URL is never read. A miss refreshes the
+// cached list once, in case a keyset was rotated in since it was fetched.
+const ext = async (proofs) => {
+  const ours = (ks) => {
+    const ids = new Set(ks.map((k) => k.id));
+    return proofs.every((p) => ids.has(p.id));
+  };
+  if (ours((await wallet()).keysets)) return false;
+  cached = undefined;
+  return !ours((await wallet()).keysets);
+};
 
 export async function get(id) {
   const token = await g(`cash:${id}`);
@@ -137,9 +140,10 @@ export async function get(id) {
 }
 
 export async function claim(token) {
-  const { mint } = await decode(token);
+  const { proofs: incoming } = await decode(token);
+  if (!incoming?.length) fail("Token has no proofs");
 
-  if (ext(mint)) fail("Unable to receive from other mints");
+  if (await ext(incoming)) fail("Unable to receive from other mints");
 
   const { w } = await wallet();
   return withCashLock(async () => {
@@ -165,7 +169,7 @@ export async function check(token) {
   const { mint, proofs } = await decode(token);
   const total = proofs.reduce((a, b) => a + b.amount, 0);
 
-  const external = ext(mint);
+  const external = await ext(proofs);
 
   const { w } = await wallet();
   let spent = 0;
