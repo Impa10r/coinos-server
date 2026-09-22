@@ -25,7 +25,7 @@ const parseZap = async (ev) => {
   let payer;
   try {
     payer = JSON.parse(description).pubkey;
-  } catch (e) {}
+  } catch {}
   payer ||= pubkey;
 
   let amount = 0;
@@ -37,7 +37,7 @@ const parseZap = async (ev) => {
       const bolt11 = tags.find((t) => t[0] === "bolt11")?.[1];
       const { amount_msat } = await ln.decode(bolt11);
       if (amount_msat) amount = Math.round(amount_msat / 1000);
-    } catch (e) {}
+    } catch {}
   }
 
   return { amount, pubkey: payer };

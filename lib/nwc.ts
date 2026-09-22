@@ -133,12 +133,12 @@ export default () => {
       const finish = (ok: boolean) => {
         if (done) return;
         done = true;
-        try { ws.close(); } catch (_) {}
+        try { ws.close(); } catch {}
         resolve(ok);
       };
       try {
         ws = new WebSocket("ws://sf:7777");
-      } catch (_) {
+      } catch {
         return resolve(false);
       }
       ws.onopen = () => ws.send(JSON.stringify(["EVENT", ev]));
@@ -146,7 +146,7 @@ export default () => {
         try {
           const m = JSON.parse(e.data);
           if (m[0] === "OK" && m[1] === ev.id) finish(!!m[2]);
-        } catch (_) {}
+        } catch {}
       };
       ws.onerror = () => finish(false);
       setTimeout(() => finish(false), timeoutMs);
@@ -186,10 +186,10 @@ export default () => {
             clearInterval(heartbeatInterval);
             try {
               r.close();
-            } catch (_) {}
+            } catch {}
             setTimeout(connect, 1000);
           }
-        } catch (_) {
+        } catch {
           warn("nwc heartbeat: error, reconnecting");
           clearInterval(heartbeatInterval);
           setTimeout(connect, 1000);
@@ -496,7 +496,7 @@ export default () => {
             };
             response = await finalizeEvent(response, hexToBytes(sk));
             r.send(["EVENT", response]);
-          } catch (_) {}
+          } catch {}
           return;
         }
         err("problem with nwc", e.message);
@@ -597,7 +597,7 @@ const createPayerProof = async (
       ...(hasPayerNote && { include: ["invreq_payer_note", "invoice_amount"] }),
     });
     return r?.proofs?.[0]?.bolt12;
-  } catch (e) {
+  } catch {
     return undefined;
   }
 };
@@ -797,7 +797,7 @@ const handle = (method, params, ev, app, user) =>
       try {
         decoded = await ln.decode(pr);
         if (decoded.valid === false) throw new Error("invalid");
-      } catch (e) {
+      } catch {
         return error({
           code: "BAD_REQUEST",
           message: "Failed to decode payment instruction",

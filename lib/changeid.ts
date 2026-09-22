@@ -113,7 +113,7 @@ export default async function changeid(un: string) {
         await s(`invoice:${iid}`, inv);
         l("changeid: updated invoice", iid);
       }
-    } catch (e) {}
+    } catch {}
   }
 
   l(`SECURITY: rekeyed ${un} from ${id} to ${nid}`);

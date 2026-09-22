@@ -340,7 +340,7 @@ export async function ensureListenerAlive() {
     const payIndex = (await g("pay_index")) || 0;
     const probe = await ln.waitanyinvoice(payIndex, 2); // 2s server-side timeout
     if (probe?.pay_index) backlog = true;
-  } catch (e: any) {
+  } catch {
     // CLN returns an error (code 904) on timeout with no waiting invoice — that
     // means NO backlog (healthy). Any other error: stay conservative, don't
     // recycle on ambiguous signals.
@@ -358,7 +358,7 @@ export async function ensureListenerAlive() {
   listenerEpoch++;
   try {
     (lnListen as any).reset?.();
-  } catch (_) {}
+  } catch {}
   listenerActive = false;
   listenerPhase = "idle";
   setTimeout(listenForLightning);

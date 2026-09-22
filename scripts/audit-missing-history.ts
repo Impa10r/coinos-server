@@ -60,7 +60,6 @@ async function classifyUser(uid: string): Promise<"clean" | "recoverable" | "los
 }
 
 const t0 = Date.now();
-let processed = 0;
 outer: for await (const keys of db.scanIterator({ MATCH: "user:*", COUNT: 1000 })) {
   for (const key of keys as unknown as string[]) {
   // Only the canonical record key user:<uuid> (skip user:<username> pointers).
@@ -74,7 +73,6 @@ outer: for await (const keys of db.scanIterator({ MATCH: "user:*", COUNT: 1000 }
   bucket[cls]++;
   if (cls === "recoverable" && examples.recoverable.length < exN) examples.recoverable.push(id);
   if (cls === "lost" && examples.lost.length < exN) examples.lost.push(id);
-  processed++;
   }
 }
 const secs = ((Date.now() - t0) / 1000).toFixed(1);

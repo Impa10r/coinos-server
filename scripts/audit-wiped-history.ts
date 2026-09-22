@@ -72,6 +72,7 @@ wipedWithBal.sort((a, b) => b.bal - a.bal);
 
 console.log("═".repeat(70));
 console.log(`  WIPED-HISTORY AUDIT — scanned ${scanned} users in ${secs}s`);
+console.log(`  ${cleanCount} with visible history, ${wipedWithBal.length + wipedNoBal.length} wiped`);
 console.log("═".repeat(70));
 console.log(`\n  Accounts with BALANCE but no history (priority — funds visible, no txns):`);
 console.log(`    count: ${wipedWithBal.length}`);

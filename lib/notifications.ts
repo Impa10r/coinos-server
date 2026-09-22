@@ -27,7 +27,7 @@ const printerMemo = (memo) => {
       const plain = meta.find((m) => Array.isArray(m) && m[0] === "text/plain");
       if (plain) return plain[1];
     }
-  } catch (e) {}
+  } catch {}
   return memo;
 };
 

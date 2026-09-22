@@ -120,9 +120,9 @@ function lightningProxy(rpcPath: string): any {
         dead.client?.removeAllListeners?.();
         dead.client?.destroy?.();
         dead.removeAllListeners?.();
-      } catch (_) {}
+      } catch {}
     }
-    if (notify) for (const cb of deathCbs) { try { cb(reason); } catch (_) {} }
+    if (notify) for (const cb of deathCbs) { try { cb(reason); } catch {} }
   }
 
   function ensure() {
