@@ -604,7 +604,7 @@ const createPayerProof = async (
 
 // Connection validity + spending budget for an NWC app, shared by pay_invoice
 // and pay. Returns a NIP-47 error payload, or null when the spend is allowed.
-const checkBudget = async (app, amount) => {
+export const checkBudget = async (app, amount) => {
   const { max_amount, budget_renewal, pubkey, created } = app;
 
   if (!created) {
@@ -630,10 +630,33 @@ const checkBudget = async (app, amount) => {
     };
   }
 
-  // A blank budget is deliberately unlimited. A positive budget must have a
-  // known renewal period; otherwise an unknown value makes every historical
-  // payment fall out of the window and silently resets the budget each call.
-  if (limit === 0) return { budgetError: null, remaining: undefined };
+  // A BLANK budget is deliberately unlimited. An explicit 0 is not, and these
+  // two used to collapse into the same `limit === 0` branch — so a connection
+  // configured with max_amount 0 got `remaining: undefined`, which
+  // assertWithinSpendLimit treats as no ceiling at all. Setting a budget of
+  // zero granted unlimited spending.
+  //
+  // That is reachable by the party it protects against: an app builds its own
+  // connection deep link, and coinos-ui's /apps/new does
+  // `Math.round(Number(max_amount) / 1000)`, so a requested budget of 0 — or
+  // any value under 500 msat — arrives here as 0. The settings page then hides
+  // the budget line entirely (`{#if app.max_amount > 0}`), so nothing on
+  // screen contradicts it.
+  if (unlimited) return { budgetError: null, remaining: undefined };
+
+  if (limit === 0) {
+    return {
+      budgetError: error({
+        code: "QUOTA_EXCEEDED",
+        message: `Budget exceeded: ${amount} of 0`,
+      }),
+      remaining: 0,
+    };
+  }
+
+  // A positive budget must have a known renewal period; otherwise an unknown
+  // value makes every historical payment fall out of the window and silently
+  // resets the budget each call.
 
   const periods = {
     daily: 60 * 60 * 24 * 1000,
