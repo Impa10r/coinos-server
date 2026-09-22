@@ -41,6 +41,49 @@ const isWithdrawLocked = (type: string): string | null => {
   return null;
 };
 
+// Containment for fund withdrawals that do NOT go through debit().
+//
+// debit() is where every stop control lives — the blacklist freeze, the global
+// freeze, the /locks kill files, the per-type server limits and the cumulative
+// withdraw breaker. routes/lnurl.ts's lnurlw callback pays real sats out over
+// lightning without calling it: it goes tbFundDebit -> ln.xpay directly. So
+// every one of those controls was off on that path, on an endpoint that takes
+// no authentication at all.
+//
+// The consequence that matters most: lib/auth.ts disables a fund the instant
+// its founder is evicted, by setting fund:<id>:disabled. take() honours that.
+// The lnurlw path did not, so an evicted account's fund stayed drainable by
+// anyone holding its link — the containment was there and simply wasn't
+// reached, which is the same shape as the eviction/authorization-drain gap
+// bfd8a286 closed.
+//
+// No whitelist exemption is possible or wanted here: an lnurlw caller is
+// anonymous, so there is no account to exempt and everything blocks.
+export const assertFundWithdrawable = async (fundId: string, amount: number) => {
+  if (await g("fund:disabled")) fail("Fund transfers temporarily disabled");
+  if (await g(`fund:${fundId}:disabled`)) fail("This fund has been disabled");
+  if ((await g("hardfreeze")) || (await g("freeze")))
+    fail("Withdrawals temporarily disabled");
+
+  const lockedKind = isWithdrawLocked(PaymentType.lightning);
+  if (lockedKind) {
+    warn("Blocking lnurlw", fundId, amount, "withdraw-lock", lockedKind);
+    fail("Withdrawals temporarily disabled");
+  }
+
+  // Counts this payout against the same rolling cumulative ceiling every other
+  // external send answers to. Without it a fund was an uncapped side door:
+  // the breaker could trip and halt every other withdrawal while lnurlw kept
+  // paying out.
+  await assertWithdrawBreaker({ amount, type: PaymentType.lightning });
+};
+
+// Call once the sats have actually left, mirroring debit()'s ordering: recording
+// at the check would let failed attempts eat the allowance and hand anyone a way
+// to trip the breaker deliberately.
+export const recordFundWithdrawal = (amount: number) =>
+  recordWithdrawal({ amount, type: PaymentType.lightning });
+
 const inFlight = new Set<string>();
 
 // A rejected xpay() is NOT evidence that CLN is finished with an invoice.

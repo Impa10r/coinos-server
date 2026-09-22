@@ -3,6 +3,7 @@ import { generate } from "$lib/invoices";
 import ln from "$lib/ln";
 import { err, l, warn } from "$lib/logging";
 import { serverPubkey2 } from "$lib/nostr";
+import { assertFundWithdrawable, recordFundWithdrawal } from "$lib/payments";
 import { getFundBalance, tbFundCredit, tbFundDebit } from "$lib/tb";
 import { SATS, bail, fail, getClientIp, getInvoice, getUser } from "$lib/utils";
 import { bech32 } from "bech32";
@@ -285,6 +286,13 @@ export default {
       if (balance === null || balance <= 0)
         return c.json({ status: "ERROR", reason: "Fund not found or empty" });
 
+      // Refuse at the request step too, so a disabled fund never advertises a
+      // balance or hands out a k1 — the callback would reject the withdrawal
+      // anyway, but only after the wallet had shown the user an amount it
+      // could not actually take.
+      if ((await g("fund:disabled")) || (await g(`fund:${fundId}:disabled`)))
+        return c.json({ status: "ERROR", reason: "This fund has been disabled" });
+
       const k1 = v4();
       await s(`lnurlw:${k1}`, fundId);
       await db.expire(`lnurlw:${k1}`, 300);
@@ -338,6 +346,13 @@ export default {
       if (amount > balance)
         return c.json({ status: "ERROR", reason: `Insufficient funds: ${balance} < ${amount}` });
 
+      // Every stop control lives in debit(), which this path never calls — see
+      // assertFundWithdrawable. Before this, a disabled fund (including one
+      // auto-disabled because its founder was evicted), a global freeze, the
+      // /locks kill files and the cumulative withdraw breaker were all
+      // inoperative here.
+      await assertFundWithdrawable(fundId, amount);
+
       const result: any = await tbFundDebit(fundId, amount, "Insufficient funds");
       if (result.err) return c.json({ status: "ERROR", reason: result.err });
 
@@ -362,6 +377,7 @@ export default {
           retry_for: 20,
         });
 
+        recordFundWithdrawal(amount);
         await db.lPush(`fund:${fundId}:payments`, `lnurlw:${pr.slice(-8)}:${amount}`);
         l("lnurlw paid from fund", fundId, amount);
         return c.json({ status: "OK" });

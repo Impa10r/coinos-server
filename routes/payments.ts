@@ -135,6 +135,14 @@ export default {
             await evictUser(user, `non-uuid fund name: ${fund}`, ip);
             fail("Invalid fund name");
           }
+          // Global kill-switch. It covered /authorize and /take but never this
+          // deposit path, which had no switch of its own — so with the whole
+          // mechanism halted, users could still pay INTO funds nobody was able
+          // to withdraw from.
+          if (await g("fund:disabled")) {
+            const whitelisted = await db.sIsMember("whitelist", user.username?.toLowerCase().trim());
+            if (!whitelisted) fail("Fund transfers temporarily disabled");
+          }
           // Per-fund kill-switch — see authorize()/take() in this file. Set
           // automatically when the fund's founder is evicted; block adding
           // MORE money to it too, not just withdrawing. Whitelisted callers
