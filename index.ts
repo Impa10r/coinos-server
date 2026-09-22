@@ -289,7 +289,14 @@ app.post("/unlimit", admin, users.unlimit);
 //   docker exec -it app bun -e 'import("$lib/lightning").then(m => m.fixBolt12())'
 
 app.get("/cash/:id/:version", ecash.get);
-app.post("/cash", ecash.save);
+// Unauthenticated and it writes to redis, so it is rate limited as well as
+// bounded in save() itself — the two together are what stop it being a way to
+// fill the database from outside.
+app.post(
+  "/cash",
+  routeRateLimit({ max: 10, windowMs: 10000, keyPrefix: "cashsave" }),
+  ecash.save,
+);
 app.post("/claim", auth, ecash.claim);
 app.post("/mint", auth, ecash.mint);
 app.post("/melt", auth, ecash.melt);

@@ -13,6 +13,13 @@ const { ecash: type } = PaymentType;
 
 Error.stackTraceLimit = 100;
 
+// A stored token is the target of an /ecash/<id> link, which people do share,
+// so this is long enough to stay useful and short enough to be a bound. Real
+// tokens are a few hundred bytes; 16KB leaves room for a many-proof token
+// without leaving room for an abusive one.
+const CASH_TTL = 30 * 24 * 60 * 60;
+const MAX_TOKEN = 16 * 1024;
+
 const sendCash = async ({ amount, user }) => {
   const id = v4();
   const hash = v4();
@@ -31,8 +38,22 @@ export default {
   async save(c) {
     const { token } = await c.req.json();
     try {
+      // Unauthenticated, and it writes to redis — so it needs its own bounds.
+      // It had none: any body, any size (Bun's default cap is 128MB and
+      // nothing lowers it), stored forever. That is an anonymous write
+      // primitive into the main database, and on an instance with no mint
+      // nothing can ever read the keys back. lnurl pointer keys reached ~45%
+      // of the database before they were given a TTL (442b4cfe); these have
+      // the same absence of expiry with none of the size discipline.
+      //
+      // The UI only ever posts a string starting with "cashu" (lib/parse.ts),
+      // so require that much rather than accepting anything at all.
+      if (typeof token !== "string" || !token.startsWith("cashu"))
+        fail("not a cashu token");
+      if (token.length > MAX_TOKEN) fail("token too large");
+
       const id = v4();
-      await s(`cash:${id}`, token);
+      await s(`cash:${id}`, token, CASH_TTL);
       return c.json({ id });
     } catch (e) {
       warn("cash save failed", getClientIp(c) ?? "unknown", e.message);
@@ -149,7 +170,17 @@ export default {
     try {
       const body = await c.req.json();
       const { id, proofs, mint, memo } = body;
-      const { uid: ref } = await getInvoice(id);
+
+      // getInvoice() returns null for an id that doesn't exist, and
+      // destructuring that threw "Cannot destructure property 'uid' from null"
+      // — an opaque 500 on an unauthenticated route, seen in production. Same
+      // omission get() had, answered the same way.
+      const invoice = await getInvoice(id);
+      if (!invoice) {
+        l("ecash receive miss", id, getClientIp(c) ?? "unknown");
+        return c.json({ error: "Not found" }, 404);
+      }
+      const { uid: ref } = invoice;
 
       const amount = await claim(
         getEncodedToken({
