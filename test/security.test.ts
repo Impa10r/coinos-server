@@ -8,7 +8,7 @@
 //
 // Override endpoints with TEST_API / TEST_REDIS if needed.
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import jwt from "jsonwebtoken";
 import { createClient } from "redis";
 
@@ -28,9 +28,41 @@ const post = (path: string, body?: any, headers: any = {}) =>
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 
+// S3 deliberately performs failed logins, and routes/users.ts counts those
+// against both the username and the client IP, locking the IP with a 429 for
+// 600s once it passes five. Two runs of this file is enough to trip it, after
+// which S3's success case and S5 both fail with 429 and the suite looks broken
+// for ten minutes. Clear the counters so the file is repeatable — otherwise
+// the only fix is to wait.
+const clearLoginLockouts = async () => {
+  const keys = [
+    `${username.toLowerCase()}:failures`,
+    ...((await db.keys("ip:*:login:fail")) as string[]),
+    ...((await db.keys("ip:*:login")) as string[]),
+  ];
+  if (keys.length) await db.del(keys);
+};
+
 beforeAll(async () => {
   db = createClient({ url: REDIS });
-  await db.connect();
+  // Deliberately fatal rather than skipped: this suite is the regression net
+  // for the 2026-08 security disclosures, and a version that quietly no-ops
+  // when it can't reach the stack would report green while covering nothing.
+  // Fail, but say what to do — the bare DNS exception this replaces gave no
+  // hint that the suite simply needs to run inside the app container.
+  try {
+    await db.connect();
+  } catch (e: any) {
+    throw new Error(
+      // Redacted: REDIS carries DB_PASSWORD, and this string goes to stdout
+      // and into whatever CI log captures it.
+      `cannot reach redis at ${REDIS.replace(/\/\/[^@]*@/, "//")} (${e.message}). This suite runs against ` +
+        "the live regtest stack from INSIDE the app container, where `db` " +
+        "resolves:\n\n" +
+        "  docker exec app sh -c 'cd /home/bun/app && bun test test/security.test.ts'\n\n" +
+        "Override with TEST_API / TEST_REDIS to point somewhere else.",
+    );
+  }
 
   const reg = await post("/signup", { user: { username, password } });
   if (reg.status !== 200)
@@ -67,6 +99,8 @@ afterAll(async () => {
   }
   await db.quit();
 });
+
+beforeEach(clearLoginLockouts);
 
 describe("S1 — websocket auth verifies the JWT signature", () => {
   const secret = "s1-test-secret";
@@ -110,15 +144,21 @@ describe("S2 — passwords hashed at bcrypt cost 12", () => {
 });
 
 describe("S3 — adminpass login fails closed", () => {
+  // A rejected login sleeps 5s before answering, on purpose — the
+  // anti-bruteforce penalty in routes/users.ts login(). That is exactly bun's
+  // default per-test timeout, so these two were racing the server's own delay
+  // and timing out on a 401 that was on its way. Give them room for it.
+  const REJECT_DELAY = 15000;
+
   test("a login with an omitted password never authenticates", async () => {
     const r = await post("/login", { username });
     expect(r.status).toBe(401);
-  });
+  }, REJECT_DELAY);
 
   test("a login with the wrong password is rejected", async () => {
     const r = await post("/login", { username, password: "not the password" });
     expect(r.status).toBe(401);
-  });
+  }, REJECT_DELAY);
 
   test("the real password still logs in (fix didn't break auth)", async () => {
     const r = await post("/login", { username, password });

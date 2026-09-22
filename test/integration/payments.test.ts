@@ -95,6 +95,30 @@ const fundViaLightning = async (token: string, amount: number) => {
 // Setup
 // =====================================================================
 
+// Each pass of this suite spends real channel liquidity: test users are funded
+// by having clb pay invoices into coinos. Once clb's outbound toward cl runs
+// out, every test fails with CLN routing errors ("not reachable directly and
+// all routehints were unusable") that read like application bugs. Top up first
+// so the suite is repeatable instead of green exactly once.
+const ensureLiquidity = async (minSat: number) => {
+  const outbound = async (): Promise<number> => {
+    const cl = await clExec("cl", "getinfo");
+    const chans = await clExec("clb", "listpeerchannels");
+    const c = (chans.channels || []).find((x: any) => x.peer_id === cl.id);
+    return c ? Math.floor(c.to_us_msat / 1000) : 0;
+  };
+  if ((await outbound()) >= minSat) return;
+  await exec("./scripts/regtest-setup.sh");
+  const after = await outbound();
+  if (after < minSat)
+    throw new Error(
+      `clb has ${after} sat outbound toward cl, needs ${minSat}. ` +
+        "Run ./scripts/regtest-setup.sh (it mines and rebalances); if it can't " +
+        "reach the target, cl's side of the channel is exhausted and the " +
+        "channel needs reopening.",
+    );
+};
+
 const ts = Date.now();
 
 beforeAll(async () => {
@@ -104,7 +128,9 @@ beforeAll(async () => {
   } catch {
     throw new Error("Lightning containers not running. Start with: docker compose up -d cl clb");
   }
-}, 30000);
+
+  await ensureLiquidity(3000000);
+}, 180000);
 
 // =====================================================================
 // Lightning send: pending -> confirmed lifecycle

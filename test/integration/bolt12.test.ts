@@ -48,7 +48,7 @@ const waitFor = async <T>(fn: () => Promise<T>, timeout = 30000): Promise<T> => 
 };
 
 const register = async (username: string, password: string): Promise<any> => {
-  const res = await fetch(`${APP}/register`, {
+  const res = await fetch(`${APP}/signup`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ user: { username, password } }),
@@ -102,6 +102,30 @@ let withdrawerToken: string;
 // Setup: register users, fund the funder via lightning
 // =====================================================================
 
+// Each pass of this suite spends real channel liquidity: test users are funded
+// by having clb pay invoices into coinos. Once clb's outbound toward cl runs
+// out, every test fails with CLN routing errors ("not reachable directly and
+// all routehints were unusable") that read like application bugs. Top up first
+// so the suite is repeatable instead of green exactly once.
+const ensureLiquidity = async (minSat: number) => {
+  const outbound = async (): Promise<number> => {
+    const cl = await clExec("cl", "getinfo");
+    const chans = await clExec("clb", "listpeerchannels");
+    const c = (chans.channels || []).find((x: any) => x.peer_id === cl.id);
+    return c ? Math.floor(c.to_us_msat / 1000) : 0;
+  };
+  if ((await outbound()) >= minSat) return;
+  await exec("./scripts/regtest-setup.sh");
+  const after = await outbound();
+  if (after < minSat)
+    throw new Error(
+      `clb has ${after} sat outbound toward cl, needs ${minSat}. ` +
+        "Run ./scripts/regtest-setup.sh (it mines and rebalances); if it can't " +
+        "reach the target, cl's side of the channel is exhausted and the " +
+        "channel needs reopening.",
+    );
+};
+
 const ts = Date.now();
 const funderName = `intfunder${ts}`;
 const withdrawerName = `intwdraw${ts}`;
@@ -117,6 +141,8 @@ beforeAll(async () => {
       "Lightning containers not running. Start with: docker compose up -d cl clb clc",
     );
   }
+
+  await ensureLiquidity(1500000);
 
   // Register test users
   const funder = await register(funderName, "testpass123");
@@ -138,7 +164,7 @@ beforeAll(async () => {
     const me = await getMe(funderToken);
     return me.balance >= 500_000 ? me : null;
   });
-}, 60000);
+}, 180000);
 
 // =====================================================================
 // Tests
@@ -179,11 +205,16 @@ describe("BOLT12 autowithdraw", () => {
     expect(finalMe.balance).toBeLessThan(1000);
 
     // clb should have received the payment
-    const clbFundsAfter = await clExec("clb", "listfunds");
-    const clbBalanceAfter = clbFundsAfter.channels.reduce(
-      (s: number, c: any) => s + c.our_amount_msat,
-      0,
-    );
+    // Poll rather than read once. The withdrawer's balance drops when coinos
+    // DEBITS, which happens before the HTLC settles on the destination node —
+    // so reading the destination's balance here raced the settlement and read
+    // a figure from before the payment landed. The tell was clc holding the
+    // PREVIOUS run's sats: they arrived after that run had already failed.
+    const clbBalanceAfter = await waitFor(async () => {
+      const f = await clExec("clb", "listfunds");
+      const bal = f.channels.reduce((s: number, c: any) => s + c.our_amount_msat, 0);
+      return bal > clbBalanceBefore ? bal : null;
+    }, 20000);
     expect(clbBalanceAfter).toBeGreaterThan(clbBalanceBefore);
 
     // Check payment records on withdrawer
@@ -226,11 +257,12 @@ describe("BOLT12 autowithdraw", () => {
     expect(finalMe.balance).toBeLessThan(1000);
 
     // clc should have received the payment (routed cl→clb→clc)
-    const clcFundsAfter = await clExec("clc", "listfunds");
-    const clcBalanceAfter = clcFundsAfter.channels.reduce(
-      (s: number, c: any) => s + c.our_amount_msat,
-      0,
-    );
+    // Settlement race — see the note in the direct-peer test above.
+    const clcBalanceAfter = await waitFor(async () => {
+      const f = await clExec("clc", "listfunds");
+      const bal = f.channels.reduce((s: number, c: any) => s + c.our_amount_msat, 0);
+      return bal > clcBalanceBefore ? bal : null;
+    }, 20000);
     expect(clcBalanceAfter).toBeGreaterThan(clcBalanceBefore);
 
     // Check payment record has routing fee
@@ -262,9 +294,15 @@ describe("BOLT12 autowithdraw", () => {
       return me.balance < 1000 ? me : null;
     }, 20000);
 
-    // Get the withdrawal payment record
-    const payments = await getPayments(withdrawerToken);
-    const withdrawal = payments.payments?.find((p: any) => p.amount < 0 && p.type === "lightning");
+    // Wait for the record finalize() writes: `ref` (the preimage) and the
+    // settled fee are both set after the payment lands, not when it is sent.
+    const withdrawal = await waitFor(async () => {
+      const payments = await getPayments(withdrawerToken);
+      const p = payments.payments?.find(
+        (x: any) => x.amount < 0 && x.type === "lightning",
+      );
+      return p?.ref ? p : null;
+    }, 20000);
     expect(withdrawal).toBeTruthy();
 
     // For a direct peer, actual routing fee should be 0 or very small
