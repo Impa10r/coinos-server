@@ -300,6 +300,27 @@ export const getUserRate = async (user) => {
   return { rates, rate, currency };
 };
 
+// A caller may only act on an account it owns.
+//
+// `aid` arrives straight from the request body — POST /bitcoin/send and
+// POST /bitcoin/fee both spread `...body` into sendOnchain()/build() — and
+// nothing downstream checked it. debit() reads account:${aid} only to pick up
+// its currency, and tbDebit debits balanceId(aid), so a field in the request
+// body chose whose balance to take. A victim's aid is not secret either: GET
+// /invoice/:id is unauthenticated and returns it, along with the account
+// record, on every invoice they have ever shared.
+//
+// The membership list is authoritative and already includes the user's own id
+// (lib/register.ts seeds it), but accept `aid === user.id` outright as well so
+// an account whose list predates that seeding can still spend from itself.
+export const requireAccount = async (user: any, aid?: string) => {
+  if (!aid || aid === user?.id) return;
+  if ((await db.lPos(`${user?.id}:accounts`, aid)) === null) {
+    err(`SECURITY: ${user?.username} tried to act on account ${aid} it does not own`);
+    fail("Unauthorized");
+  }
+};
+
 export const debit = async ({
   aid = undefined,
   hash,
@@ -1074,6 +1095,8 @@ const sendNonCustodial = async (params) => {
 export const sendOnchain = async (params) => {
   let { aid, hex, rate, user, signed, address: destAddress } = params;
   if (!aid) aid = user.id;
+
+  await requireAccount(user, aid);
 
   // Non-custodial bitcoin account — use esplora
   if (aid !== user.id) {
@@ -1852,6 +1875,10 @@ const buildNonCustodial = async ({ aid, amount, address, feeRate, subtract }) =>
 };
 
 export const build = async ({ aid, amount, address, feeRate, subtract, user }) => {
+  // Reached directly from POST /bitcoin/fee, which spreads the request body —
+  // without this it returns a transaction built over another account's UTXOs,
+  // disclosing its balance and derived addresses.
+  await requireAccount(user, aid);
   const type = await getAddressType(address);
   if (!aid) aid = user.id;
 
