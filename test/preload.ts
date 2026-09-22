@@ -217,7 +217,12 @@ if (process.env.INTEGRATION) {
   }));
 
   mock.module("$lib/tb", () => ({
-    getBalance: mock(async () => 10_000_000),
+    // Per-account when a test sets __testStore.balances, so a test can tell
+    // which account a balance was read from (the frozen-balance check in
+    // debit() compares two different accounts). Default unchanged.
+    getBalance: mock(async (id: string) =>
+      (globalThis as any).__testStore.balances?.[id] ?? 10_000_000,
+    ),
     getPending: mock(async () => 0),
     getCredit: mock(async () => 0),
     tbDebit: mock(async () => 0),

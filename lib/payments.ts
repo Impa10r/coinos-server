@@ -495,7 +495,19 @@ export const debit = async ({
   if (type !== PaymentType.internal)
     await assertWithdrawBreaker({ amount, type, username: user?.username });
 
-  const frozenBalance = !blacklisted || whitelisted ? 0 : await getBalance(uid);
+  // Freeze the balance of the account actually being debited, not the user's
+  // main one. tbDebit checks `balance(aid) - frozen < total`, so computing
+  // frozen from `uid` while spending from a sub-account compared two different
+  // accounts: with a main balance of 0 and a sub-account holding funds, the
+  // whole sub-account balance stayed spendable while blacklisted. The freeze
+  // is meant to make a compromised account's money unreachable (see
+  // evictUser() in lib/auth.ts, which sets `blacklist` for exactly that), and
+  // it only reached one account of however many the user has.
+  //
+  // aid === uid on the ordinary path, so this is unchanged for everyone who
+  // isn't blacklisted, and unchanged for blacklisted users spending from their
+  // main account.
+  const frozenBalance = !blacklisted || whitelisted ? 0 : await getBalance(aid);
 
   ourfee = await tbDebit(
     aid,
