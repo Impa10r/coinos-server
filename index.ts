@@ -23,6 +23,7 @@ import { listenForDMs, syncGroupsAndSave } from "$lib/dmNotifications";
 import { announceFips } from "$lib/fips";
 import { initMlsIndex } from "$lib/mls";
 
+import { ecashEnabled } from "$lib/ecash";
 import ecash from "$routes/ecash";
 import email from "$routes/email";
 import info from "$routes/info";
@@ -288,19 +289,34 @@ app.post("/unlimit", admin, users.unlimit);
 // for deliberate one-off use:
 //   docker exec -it app bun -e 'import("$lib/lightning").then(m => m.fixBolt12())'
 
-app.get("/cash/:id/:version", ecash.get);
-// Unauthenticated and it writes to redis, so it is rate limited as well as
-// bounded in save() itself — the two together are what stop it being a way to
-// fill the database from outside.
-app.post(
-  "/cash",
-  routeRateLimit({ max: 10, windowMs: 10000, keyPrefix: "cashsave" }),
-  ecash.save,
-);
-app.post("/claim", auth, ecash.claim);
-app.post("/mint", auth, ecash.mint);
-app.post("/melt", auth, ecash.melt);
-app.post("/ecash/:id", ecash.receive);
+// Ecash only exists when a mint is configured (config.mintUrl). Without one every
+// operation fails on an unreachable host, so rather than serve endpoints that
+// can only error, answer 503 before any handler runs. Said out loud at boot
+// below, because a subsystem that switches itself off silently is worse than
+// one that is on.
+if (ecashEnabled) {
+  app.get("/cash/:id/:version", ecash.get);
+  // Unauthenticated and it writes to redis, so it is rate limited as well as
+  // bounded in save() itself — the two together are what stop it being a way
+  // to fill the database from outside.
+  app.post(
+    "/cash",
+    routeRateLimit({ max: 10, windowMs: 10000, keyPrefix: "cashsave" }),
+    ecash.save,
+  );
+  app.post("/claim", auth, ecash.claim);
+  app.post("/mint", auth, ecash.mint);
+  app.post("/melt", auth, ecash.melt);
+  app.post("/ecash/:id", ecash.receive);
+} else {
+  const off = (c: any) => c.json({ error: "ecash is not available on this instance" }, 503);
+  app.get("/cash/:id/:version", off);
+  app.post("/cash", off);
+  app.post("/claim", off);
+  app.post("/mint", off);
+  app.post("/melt", off);
+  app.post("/ecash/:id", off);
+}
 
 // GET /replay/:index removed. It was an unauthenticated ops-only
 // reconciliation trigger, already neutered — the handler body was commented
@@ -330,6 +346,8 @@ Bun.serve({
 });
 
 l(`coinos server listening on ${host_}:${port}`);
+if (!ecashEnabled)
+  l("ecash disabled: config.mintUrl is not set — /cash, /claim, /mint, /melt and /ecash/:id answer 503");
 
 const logerr = (_e: Error) => {};
 process.on("unhandledRejection", logerr);

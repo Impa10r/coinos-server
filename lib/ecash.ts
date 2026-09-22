@@ -14,7 +14,20 @@ import {
 } from "@cashu/cashu-ts";
 
 const { URL } = process.env;
-const m = new CashuMint(config.mintUrl);
+
+// Ecash is off unless a mint is configured. Without one, every operation here
+// fails on an unreachable host — "Unable to connect. Is the computer able to
+// access the url?" on repeat — while /cash, /claim, /melt and /ecash/:id stay
+// exposed. That is surface with no working feature behind it, so refuse at the
+// door instead, and let index.ts decline to serve the routes at all.
+// Switch: config.mintUrl — comment it out to turn ecash off.
+export const ecashEnabled = !!config.mintUrl;
+
+const enabled = () => {
+  if (!ecashEnabled) fail("ecash is not available on this instance");
+};
+
+const m = ecashEnabled ? new CashuMint(config.mintUrl) : (undefined as any);
 
 // The mint issues NUT-02 v1 keyset ids (`01…`, 33 bytes). cashu-ts 2.9.0 only
 // derives v0 ids, so CashuWallet.getKeys() rejects every keyset with "Couldn't
@@ -27,6 +40,7 @@ const m = new CashuMint(config.mintUrl);
 const KEYS_TTL = 10 * 60 * 1000;
 let cached: { w: CashuWallet; keysets: any[]; at: number } | undefined;
 const wallet = async () => {
+  enabled();
   if (cached && Date.now() - cached.at < KEYS_TTL) return cached;
   const [{ keysets: keys }, { keysets }] = await Promise.all([
     m.getKeys(),
@@ -47,6 +61,10 @@ const wallet = async () => {
 // of six context-free error lines in production turned out to be. Guard here
 // so every entry point gets a message an operator can read.
 const decode = async (token) => {
+  // Before the try: wallet() calls enabled() too, but from in there the
+  // refusal comes back wrapped as "Invalid token: ecash is not available",
+  // which blames the caller's token for a server-side setting.
+  enabled();
   if (typeof token !== "string" || !token) fail("Invalid token");
   try {
     return getDecodedToken(token, (await wallet()).keysets);
@@ -135,6 +153,7 @@ const ext = async (proofs) => {
 };
 
 export async function get(id) {
+  enabled();
   const token = await g(`cash:${id}`);
   return token;
 }
@@ -181,6 +200,7 @@ export async function check(token) {
 }
 
 export async function init(amount = 100000) {
+  enabled();
   try {
     await new Promise((r) => setTimeout(r, 2000));
     const { w } = await wallet();
@@ -198,6 +218,7 @@ export async function init(amount = 100000) {
 }
 
 export function request(uuid, amount, memo) {
+  enabled();
   const target = `${URL}/api/ecash/${uuid}`;
 
   const { POST: type } = PaymentRequestTransportType;
