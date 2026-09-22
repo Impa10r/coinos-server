@@ -1,5 +1,10 @@
 import { mock } from "bun:test";
 
+// Route modules read these at import time (routes/users.ts builds a URL from
+// process.env.URL, routes/lnurl.ts splits it), so they have to exist before
+// anything imports them or the module throws on load.
+process.env.URL ||= "http://localhost:3119";
+
 // This file is loaded before test files via bunfig.toml [test].preload
 // Mocks must be set up here to intercept transitive imports
 
@@ -180,6 +185,12 @@ if (process.env.INTEGRATION) {
       s,
       gf,
       gfAll: async (keys: string[]) => Promise.all(keys.map(gf)),
+      // Async generator over the kv store, matching lib/db.ts's scan(). Needed
+      // by routes/users.ts, which cannot be imported without it.
+      scan: async function* (pattern: string) {
+        const prefix = pattern.replace("*", "");
+        for (const k of Object.keys(kv())) if (k.startsWith(prefix)) yield k;
+      },
       sa,
       ga,
       archive: { lRange: async () => [] },
@@ -462,7 +473,10 @@ if (process.env.INTEGRATION) {
       sats: (n: number) => Math.round(n * SATS),
       sleep: async () => {},
       t: () => ({ insufficientFunds: "Insufficient funds" }),
-      bail: (res: any, msg: string) => res.code(500).send(msg),
+      // Matches lib/utils.ts's bail, which became Hono-shaped in the Fastify
+      // migration; this mock still had the old res.code().send() form, so any
+      // test reaching a bail() path died on it rather than seeing the refusal.
+      bail: (c: any, msg: string) => c.json(msg, 500),
       bip21: () => "",
       fields: [],
       nada: () => {},
