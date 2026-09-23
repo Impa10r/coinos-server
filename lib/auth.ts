@@ -266,12 +266,9 @@ export const optional = async (c, next) => {
   await next();
 };
 
-export const admin = async (c, next) => {
-  const user = await authenticate(c);
-  if (!user?.admin) return c.json("unauthorized", 401);
-  c.set("user", user);
-  await next();
-};
+// The `admin` middleware was removed with its only two consumers, POST
+// /hidepay and POST /unlimit. The remaining admin-gated paths (reset(),
+// sanitizeImages()) compare config.adminpass inside the handler instead.
 
 export const requirePin = async ({ body, user }) => {
   if (!user || (user.pin && user.pin !== body.pin)) fail("Invalid pin");

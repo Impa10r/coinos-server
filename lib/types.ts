@@ -17,7 +17,6 @@ export interface User {
   follows: string;
   haspin: string;
   hasprinter: string;
-  hidepay: string;
   id: string;
   index: string;
   keys: string;

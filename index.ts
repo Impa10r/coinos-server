@@ -1,5 +1,5 @@
 import app, { routeRateLimit } from "$lib/app";
-import { admin, auth, optional } from "$lib/auth";
+import { auth, optional } from "$lib/auth";
 
 import { listenForLightning, ensureListenerAlive } from "$lib/lightning";
 import { l } from "$lib/logging";
@@ -279,8 +279,12 @@ app.post("/items/sort", auth, items.sort);
 
 app.post("/shopify/:id", shopify);
 
-app.post("/hidepay", admin, users.hidepay);
-app.post("/unlimit", admin, users.unlimit);
+// POST /hidepay and POST /unlimit removed. Each set a flag on an arbitrary
+// account, and neither flag was ever read: `unlimited` was written and nothing
+// consulted it, `hidepay` only appeared in output projections. Admin-gated
+// endpoints that change nothing are surface without a feature behind them.
+// GET /users is deliberately KEPT — unlike upstream, this fork's admin page
+// (coinos-ui /admin) calls it.
 // GET /bolt12 removed. It served fixBolt12(), a one-off repair routine that
 // full-scans payment:*, deletes payment records and calls tbSetBalance to
 // subtract from user balances — and it was UNAUTHENTICATED, so anyone who knew

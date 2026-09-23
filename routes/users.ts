@@ -1286,24 +1286,6 @@ export default {
     }
   },
 
-  async hidepay(c) {
-    const body = await c.req.json();
-    const { username } = body;
-    const u = await getUser(username);
-    u.hidepay = true;
-    await s(`user:${u.id}`, u);
-    return c.json({});
-  },
-
-  async unlimit(c) {
-    const body = await c.req.json();
-    const { username } = body;
-    const u = await getUser(username);
-    u.unlimited = true;
-    await s(`user:${u.id}`, u);
-    return c.json({});
-  },
-
   async account(c) {
     const id = c.req.param("id");
     const { id: uid } = c.get("user");
