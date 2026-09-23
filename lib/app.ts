@@ -10,8 +10,13 @@ import { pino } from "pino";
 
 const app = new Hono();
 
-const reqLogger = pino((pino as any).destination("req"));
-const resLogger = pino((pino as any).destination("res"));
+// Off unless config.requestLog is set — see the note there. Constructing the
+// destinations lazily matters: pino.destination() creates and holds the file
+// open, so building them unconditionally would recreate `req` and `res` the
+// moment the app restarts, even with logging disabled.
+const requestLog = !!(config as any).requestLog;
+const reqLogger = requestLog ? pino((pino as any).destination("req")) : null;
+const resLogger = requestLog ? pino((pino as any).destination("res")) : null;
 
 // IP blacklist — the app-level enforcement layer for the `cf:banned` redis
 // set that lib/auth.ts's banIp() maintains. Checked first, before CORS/rate-
@@ -198,6 +203,8 @@ export const redactBody = (body: any, depth = 0): any => {
 
 // Request logging
 app.use("*", async (c, next) => {
+  if (!requestLog) return next();
+
   const start = Date.now();
   const url = c.req.path;
 
@@ -239,7 +246,7 @@ app.use("*", async (c, next) => {
       } catch {}
     }
 
-    reqLogger.info({
+    reqLogger?.info({
       method: c.req.method,
       url,
       ip,
@@ -258,7 +265,7 @@ app.use("*", async (c, next) => {
     return acc;
   }, {});
 
-  resLogger.info({
+  resLogger?.info({
     url,
     statusCode: c.res.status,
     durationMs: Date.now() - start,
