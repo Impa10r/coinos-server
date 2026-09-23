@@ -23,6 +23,17 @@
 
 set -euo pipefail
 
+# Serialize the whole script. The integration suites call it from their
+# beforeAll when they find the liquidity short, and bun may have more than one
+# suite in flight — two copies mining blocks and rebalancing the same channels
+# at once made the other suite fail for reasons that looked like application
+# bugs. flock makes the second caller wait for the first, and since this script
+# is idempotent it then finds the work already done and exits quickly.
+LOCK=${TMPDIR:-/tmp}/coinos-regtest-setup.lock
+if [ "${REGTEST_SETUP_LOCKED:-}" != "1" ] && command -v flock >/dev/null 2>&1; then
+  exec env REGTEST_SETUP_LOCKED=1 flock "$LOCK" "$0" "$@"
+fi
+
 TARGET_CLB_OUT_SAT=${TARGET_CLB_OUT_SAT:-5000000}
 CHANNEL_SAT=${CHANNEL_SAT:-5000000}
 CHUNK_SAT=${CHUNK_SAT:-1000000}
