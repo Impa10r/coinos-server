@@ -1434,36 +1434,44 @@ export default {
     const { name, autowithdraw, threshold, reserve, destination, currency, fingerprint, pubkey } =
       body;
 
-    const pos = await db.lPos(`${uid}:accounts`, id);
-    if (pos == null) fail("account not found");
+    // The try starts after c.req.json() on purpose: a malformed body should
+    // reach app.onError, which answers 400. Everything below can fail("...")
+    // for a reason the caller should see, and that escaped as a bare 500.
+    try {
+      const pos = await db.lPos(`${uid}:accounts`, id);
+      if (pos == null) fail("account not found");
 
-    const account = await g(`account:${id}`);
-    if (name !== undefined) account.name = name;
-    if (autowithdraw !== undefined) account.autowithdraw = autowithdraw;
-    if (threshold !== undefined) account.threshold = threshold;
-    if (reserve !== undefined) account.reserve = reserve;
-    if (destination !== undefined) account.destination = destination.trim();
-    if (currency !== undefined) account.currency = currency;
+      const account = await g(`account:${id}`);
+      if (name !== undefined) account.name = name;
+      if (autowithdraw !== undefined) account.autowithdraw = autowithdraw;
+      if (threshold !== undefined) account.threshold = threshold;
+      if (reserve !== undefined) account.reserve = reserve;
+      if (destination !== undefined) account.destination = destination.trim();
+      if (currency !== undefined) account.currency = currency;
 
-    let needsImport = false;
-    if (fingerprint !== undefined && pubkey !== undefined) {
-      account.fingerprint = fingerprint;
-      account.pubkey = pubkey;
-      account.importedAt = null;
-      needsImport = true;
+      let needsImport = false;
+      if (fingerprint !== undefined && pubkey !== undefined) {
+        account.fingerprint = fingerprint;
+        account.pubkey = pubkey;
+        account.importedAt = null;
+        needsImport = true;
+      }
+
+      await s(`account:${id}`, account);
+
+      if (needsImport) {
+        importAccountHistory(account)
+          .then(() => {
+            emit(uid, "payment", { aid: id, type: "import" });
+          })
+          .catch((e) => console.error("importAccountHistory failed:", e.message));
+      }
+
+      return c.json(account);
+    } catch (e: any) {
+      warn("updateAccount failed", id, e.message);
+      return bail(c, e.message);
     }
-
-    await s(`account:${id}`, account);
-
-    if (needsImport) {
-      importAccountHistory(account)
-        .then(() => {
-          emit(uid, "payment", { aid: id, type: "import" });
-        })
-        .catch((e) => console.error("importAccountHistory failed:", e.message));
-    }
-
-    return c.json(account);
   },
 
   async deleteAccount(c) {
@@ -1581,30 +1589,38 @@ export default {
   async app(c) {
     const pubkey = c.req.param("pubkey");
     const user = c.get("user");
-    const app = await g(`app:${pubkey}`);
-    // Missing records must 404, not crash into a 500: clients (Damus one-click
-    // setup) probe this endpoint and treat 404 as "not configured yet, create
-    // one" — anything else aborts their whole connection flow.
-    if (!app) return c.json({ error: "connection not found" }, 404);
-    if (app.uid !== user.id) fail("unauthorized");
+    try {
+      const app = await g(`app:${pubkey}`);
+      // Missing records must 404, not crash into a 500: clients (Damus one-click
+      // setup) probe this endpoint and treat 404 as "not configured yet, create
+      // one" — anything else aborts their whole connection flow.
+      if (!app) return c.json({ error: "connection not found" }, 404);
+      if (app.uid !== user.id) fail("unauthorized");
 
-    const lud16 = `${user.username}@${host}`;
+      const lud16 = `${user.username}@${host}`;
 
-    const pids = (await db.lRange(`${pubkey}:payments`, 0, -1)) || [];
+      const pids = (await db.lRange(`${pubkey}:payments`, 0, -1)) || [];
 
-    const payments = await Promise.all(
-      pids.map(async (pid) => {
-        const p = await gf(`payment:${pid}`);
-        if (p) p.user = await g(`user:${p.uid}`);
-        return p;
-      }),
-    );
+      const payments = await Promise.all(
+        pids.map(async (pid) => {
+          const p = await gf(`payment:${pid}`);
+          if (p) p.user = await g(`user:${p.uid}`);
+          return p;
+        }),
+      );
 
-    if (app.secret)
-      app.nwc = `nostr+walletconnect://${serverPubkey2}?relay=${relay}&secret=${app.secret}&lud16=${lud16}`;
-    app.payments = payments.filter((p) => p);
+      if (app.secret)
+        app.nwc = `nostr+walletconnect://${serverPubkey2}?relay=${relay}&secret=${app.secret}&lud16=${lud16}`;
+      app.payments = payments.filter((p) => p);
 
-    return c.json(app);
+      return c.json(app);
+    } catch (e: any) {
+      // fail("unauthorized") used to escape to app.onError: the caller got a
+      // bare {ok:false} 500 and it was logged as a server fault, when asking
+      // for someone else's connection is a refusal we intend to make.
+      warn("app failed", pubkey, user?.username, e.message);
+      return bail(c, e.message);
+    }
   },
 
   async apps(c) {

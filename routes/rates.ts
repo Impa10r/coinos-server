@@ -7,7 +7,9 @@ let lastIrt = 0;
 
 export default {
   async fx(c) {
-    const { fx } = await g("fx");
+    // `fx` is unset until the rates fetcher has run once, and destructuring
+    // null threw — an unauthenticated GET answering 500 on a cold start.
+    const { fx } = (await g("fx")) ?? {};
     c.header("Cache-Control", "public, max-age=300");
     return c.json({ fx });
   },

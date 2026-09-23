@@ -134,7 +134,11 @@ export default {
 
     for (const { type, value } of parts) {
       if (type.includes("nprofile") || type.includes("npub")) {
-        const { name } = await getProfile(value.pubkey);
+        // The pubkey comes from the caller's own event content, and one with
+        // no cached profile returns null — destructuring it threw, so a single
+        // unknown npub in a parsed note 500'd the whole request. Same shape at
+        // the other two getProfile sites in this file.
+        const { name } = (await getProfile(value.pubkey)) ?? ({} as any);
         names[value.pubkey] = name;
       }
     }
@@ -163,7 +167,7 @@ export default {
         e.names = {};
         for (const { type, value } of e.parts) {
           if (type.includes("nprofile") || type.includes("npub")) {
-            const { name } = await getProfile(value.pubkey);
+            const { name } = (await getProfile(value.pubkey)) ?? ({} as any);
             e.names[value.pubkey] = name;
           }
         }
@@ -241,7 +245,7 @@ export default {
         e.names = {};
         for (const { type, value } of e.parts) {
           if (type.includes("nprofile") || type.includes("npub")) {
-            const { name } = await getProfile(value.pubkey);
+            const { name } = (await getProfile(value.pubkey)) ?? ({} as any);
             e.names[value.pubkey] = name;
           }
         }

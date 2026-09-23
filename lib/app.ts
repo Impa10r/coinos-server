@@ -242,7 +242,20 @@ app.use("*", async (c, next) => {
 
 // Error handler
 app.onError((err, c) => {
-  console.error("unhandled error:", c.req.method, c.req.path, err?.message || err);
+  // A body that isn't JSON is the caller's mistake, not a server fault. Most
+  // handlers call `await c.req.json()` without guarding it, so any request
+  // with a malformed body produced a 500 and an "unhandled error" log line —
+  // trivially reachable on the unauthenticated routes, and every one of those
+  // lines is noise in the stream where real faults have to be visible.
+  // Answering 400 here fixes it for every handler at once, including the ones
+  // written after this.
+  const msg = err?.message || String(err);
+  if (/JSON Parse error|Unexpected end of JSON|is not valid JSON/i.test(msg)) {
+    console.warn("invalid request body:", c.req.method, c.req.path);
+    return c.json({ error: "Invalid request body" }, 400);
+  }
+
+  console.error("unhandled error:", c.req.method, c.req.path, msg);
   return c.json({ ok: false }, 500);
 });
 
