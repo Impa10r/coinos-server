@@ -126,8 +126,17 @@ if (prod) {
       rateLimits.set(key, { count: 1, reset: now + 2000 });
     }
 
-    // Strict rate limit for /login and /send: 10 req / 10s
-    const isStrict = url.includes("/login") || url.includes("/send");
+    // Strict rate limit for /login, /send and /pin: 10 req / 10s.
+    //
+    // /pin is here because a pin is six digits — the entire space is 10^6, and
+    // under the general limit alone (2000 req / 2s) an attacker holding a
+    // stolen session could walk all of it in minutes. The pin is the last
+    // thing standing between such a session and a send, so it needs a limit
+    // that makes guessing it pointless rather than merely slow. Exact match,
+    // not includes(): a substring test would rope in any future path
+    // containing "pin".
+    const isStrict =
+      url.includes("/login") || url.includes("/send") || url === "/pin";
     if (isStrict) {
       // Keying on UA alone lets anyone bypass this by rotating the header.
       // Tie it to the authenticated account when there's a valid session

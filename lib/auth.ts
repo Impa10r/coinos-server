@@ -1,6 +1,7 @@
 import config from "$config";
 import { db } from "$lib/db";
 import { banKey, fail, getClientIp, getPayment, getUser } from "$lib/utils";
+import { timingSafeEqual } from "crypto";
 import jwt from "jsonwebtoken";
 import { getCookie } from "hono/cookie";
 
@@ -270,6 +271,43 @@ export const optional = async (c, next) => {
 // /hidepay and POST /unlimit. The remaining admin-gated paths (reset(),
 // sanitizeImages()) compare config.adminpass inside the handler instead.
 
+// The pin is a credential, so it is stored as a digest, never compared with
+// `!==`, and checked in one place rather than three.
+//
+// lib/migrate.ts's hashPins() hashed every pin once and set `pins:hashed` so
+// it can never run again — but nothing hashed on WRITE, so every pin set since
+// went back into redis as six plaintext digits. The property that migration
+// existed for lapsed the moment it finished.
+//
+// It also left the accounts it migrated unable to use their pin at all: their
+// stored value became a 64-char digest while the client kept sending six
+// digits, so requirePin() failed for ever, and requirePin() gates sending.
+// Hashing the supplied value repairs those accounts as a side effect —
+// sha256(their pin) is exactly what is stored.
+export const hashPin = (v: string) =>
+  new Bun.CryptoHasher("sha256").update(v).digest("hex");
+
+const constantEqual = (a: string, b: string) => {
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x as any, y as any);
+};
+
+export const pinMatches = (user: any, supplied: unknown): boolean => {
+  const stored = user?.pin;
+  if (!stored) return true; // no pin set — nothing to satisfy
+  if (typeof supplied !== "string" || !supplied) return false;
+
+  // A stored digest accepts the hash of what was typed. It also accepts the
+  // digest itself, because update() has always allowed a client to send a
+  // 64-char value directly and some may.
+  if (stored.length === 64)
+    return constantEqual(hashPin(supplied), stored) || constantEqual(supplied, stored);
+
+  // Legacy plaintext, from any pin set between the migration and this change.
+  return constantEqual(supplied, stored);
+};
+
 export const requirePin = async ({ body, user }) => {
-  if (!user || (user.pin && user.pin !== body.pin)) fail("Invalid pin");
+  if (!user || !pinMatches(user, body?.pin)) fail("Invalid pin");
 };

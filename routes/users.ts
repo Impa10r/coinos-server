@@ -17,7 +17,7 @@ const sanitizeImageUrl = (url: string | undefined): string | undefined => {
   return url;
 };
 import config from "$config";
-import { isEvicted, requirePin } from "$lib/auth";
+import { hashPin, isEvicted, pinMatches, requirePin } from "$lib/auth";
 import { db, g, ga, gf, gfAll, s, scan } from "$lib/db";
 import { err, l, warn } from "$lib/logging";
 import { mail, templates } from "$lib/mail";
@@ -408,10 +408,17 @@ export default {
         user.nsec = undefined;
       }
 
-      if (user.pin && !(pin === user.pin)) fail("Pin required");
-      if (typeof newpin !== "undefined" && (newpin.length === 6 || newpin.length === 64))
-        user.pin = newpin;
-      if (user.pin === "delete") user.pin = undefined;
+      if (user.pin && !pinMatches(user, pin)) fail("Pin required");
+
+      // "delete" is handled before hashing, and deliberately so: it is six
+      // characters, so hashing first would turn the sentinel into a digest and
+      // the `=== "delete"` test below it would never fire again — a user asking
+      // to remove their pin would silently get a new one they never chose.
+      if (typeof newpin !== "undefined") {
+        if (newpin === "delete") user.pin = undefined;
+        else if (newpin.length === 6 || newpin.length === 64)
+          user.pin = newpin.length === 64 ? newpin : hashPin(newpin);
+      }
 
       let staleUsernameKey: string | undefined;
       if (username) {
@@ -869,7 +876,7 @@ export default {
     const body = await c.req.json();
     const { pin } = body;
     const user = c.get("user");
-    return c.json(!user.pin || user.pin === pin);
+    return c.json(pinMatches(user, pin));
   },
 
   async otpsecret(c) {

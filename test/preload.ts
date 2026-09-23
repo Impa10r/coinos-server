@@ -382,14 +382,6 @@ if (process.env.INTEGRATION) {
     alert: async () => {},
     templates: {},
   }));
-  mock.module("$lib/auth", () => ({
-    requirePin: async () => {},
-    auth: (_r: any, _s: any, n: any) => n(),
-    optional: (_r: any, _s: any, n: any) => n(),
-    admin: (_r: any, _s: any, n: any) => n(),
-    isEvicted: async () => false,
-    evictUser: async () => {},
-  }));
   mock.module("$lib/invoices", () => ({
     generate: mock(async ({ invoice, user }: any) => ({
       id: "gen-inv",
@@ -517,4 +509,19 @@ if (process.env.INTEGRATION) {
       time: () => ({ start: () => {}, end: () => {} }),
     };
   });
+  // Placed after the $lib/utils mock above so the real module binds the mocked
+  // utils, and spread from the real one rather than replaced wholesale.
+  //
+  // The middleware and eviction stubs are what route tests actually need. The
+  // pure functions are not: stubbing requirePin to `async () => {}` meant no
+  // test had ever exercised pin enforcement, which is how a pin comparison
+  // that could never match a migrated account went unnoticed.
+  const realAuth = await import("$lib/auth");
+  mock.module("$lib/auth", () => ({
+    ...realAuth,
+    auth: (_r: any, _s: any, n: any) => n(),
+    optional: (_r: any, _s: any, n: any) => n(),
+    isEvicted: async () => false,
+    evictUser: async () => {},
+  }));
 } // end INTEGRATION skip
