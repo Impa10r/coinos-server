@@ -382,24 +382,6 @@ if (process.env.INTEGRATION) {
     alert: async () => {},
     templates: {},
   }));
-  mock.module("$lib/invoices", () => ({
-    generate: mock(async ({ invoice, user }: any) => ({
-      id: "gen-inv",
-      hash: "gen-hash",
-      uid: user?.id,
-      received: 0,
-      pending: 0,
-      ...invoice,
-    })),
-    getUserOffer: mock(async () => ({ id: "gen-offer", hash: "gen-offer-hash" })),
-    parseEntry: (e: string) => {
-      try {
-        const parsed = JSON.parse(e);
-        if (parsed?.preimage) return { price: null, fiat: null, currency: null, ...parsed };
-      } catch {}
-      return { preimage: e, price: null, fiat: null, currency: null };
-    },
-  }));
   mock.module("$lib/api", () => ({
     default: { bitcoin: "http://localhost", liquid: "http://localhost" },
   }));
@@ -523,5 +505,28 @@ if (process.env.INTEGRATION) {
     optional: (_r: any, _s: any, n: any) => n(),
     isEvicted: async () => false,
     evictUser: async () => {},
+  }));
+  // Also after the $lib/utils mock, and opt-in rather than absolute.
+  //
+  // The stub below echoes `...invoice` straight back, so a test asserting on a
+  // field it passed in passes without any of generate() running — which is how
+  // two tests of the aid-ownership check went green against a function that
+  // had never been called. Set __testStore.realGenerate in a suite that needs
+  // the real thing; everything else keeps the cheap stub, which is all
+  // forward/onchain want from it.
+  // Destructured, NOT kept as the namespace object: an ES module namespace is a
+  // live view, so `ns.generate` re-resolves to whatever mock.module installed —
+  // calling through it recursed until the stack gave out. Destructuring reads
+  // the binding once and holds the original function.
+  const { generate: realGenerate, parseEntry: realParseEntry } =
+    await import("$lib/invoices");
+  mock.module("$lib/invoices", () => ({
+    generate: mock(async (args: any) => {
+      if ((globalThis as any).__testStore.realGenerate) return realGenerate(args);
+      const { invoice, user } = args;
+      return { id: "gen-inv", hash: "gen-hash", uid: user?.id, received: 0, pending: 0, ...invoice };
+    }),
+    getUserOffer: mock(async () => ({ id: "gen-offer", hash: "gen-offer-hash" })),
+    parseEntry: realParseEntry,
   }));
 } // end INTEGRATION skip

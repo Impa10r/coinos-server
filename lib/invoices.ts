@@ -60,7 +60,23 @@ export const generate = async ({ invoice, user }) => {
   if (!user) fail("user not provided");
   if (typeof prompt === "undefined") prompt = user.prompt;
 
-  let account = await g(`account:${aid}`);
+  // `aid` arrives inside the caller's invoice object, and POST /invoice takes
+  // `optional` auth — anyone may raise a payment request for a merchant. So an
+  // unchecked aid let an unauthenticated caller name ANY account, and for a
+  // non-custodial one the block below then derives the next address from that
+  // account's xpub, returns it, and writes the incremented nextIndex back.
+  // That is a stranger enumerating a wallet's on-chain addresses one request
+  // at a time, and advancing their derivation counter while doing it. The
+  // account id is not a secret either: GET /invoice/:id is unauthenticated and
+  // returns `aid` for any invoice that account has shared.
+  //
+  // Ignore rather than refuse. Legitimate clients do send an aid — coinos-ui's
+  // lib/invoice.ts puts a cookie-held one in the invoice while naming a
+  // different `user` for the merchant-receive flow — so refusing would break
+  // that. Falling back to the named user's own account keeps every honest call
+  // working and leaves nothing to enumerate.
+  let account = aid ? await g(`account:${aid}`) : null;
+  if (account && account.uid && account.uid !== user.id) account = null;
   if (!account) account = await g(`account:${user.id}`);
   if (!account) fail("account not found");
   aid = account.id;
