@@ -104,7 +104,7 @@ const fetchOnce = async (
   // needing to know the SSRF-guard internals. Accept either a single Agent
   // or the got-style { http, https } pair (routes/lnurl.ts's existing call
   // shape) and resolve it to the one matching this request's protocol.
-  const { agent: rawAgent, ...restOpts } = extraOpts;
+  const { agent: rawAgent, body, ...restOpts } = extraOpts;
   const agent =
     rawAgent && typeof rawAgent === "object" && ("http" in rawAgent || "https" in rawAgent)
       ? mod === https
@@ -125,10 +125,19 @@ const fetchOnce = async (
         port,
         path: `${u.pathname}${u.search}`,
         method: "GET",
-        headers: { accept: "application/json", host: u.hostname },
         ...(mod === https ? { servername: u.hostname } : {}),
         ...(agent ? { agent } : {}),
         ...restOpts,
+        // Headers merged LAST and explicitly, not left to the spread above.
+        // `restOpts` carrying its own `headers` would replace this object
+        // wholesale and take `host` with it — and the connection is made to a
+        // validated IP, so that header is the only thing telling the far end
+        // which name was asked for.
+        headers: {
+          accept: "application/json",
+          host: u.hostname,
+          ...restOpts.headers,
+        },
       },
       (res) => {
         const status = res.statusCode || 0;
@@ -143,7 +152,11 @@ const fetchOnce = async (
           } catch {
             return reject(new Error("bad redirect target"));
           }
-          return resolve(fetchOnce(next, redirectsLeft - 1, extraOpts));
+          // Drop the body on a redirect. Replaying a POST body to a
+          // redirect target is how a validated first hop becomes a delivery
+          // to somewhere else entirely.
+          const { body: _dropped, ...followOpts } = extraOpts;
+          return resolve(fetchOnce(next, redirectsLeft - 1, followOpts));
         }
 
         let len = 0;
@@ -168,6 +181,7 @@ const fetchOnce = async (
     );
     req.setTimeout(TIMEOUT_MS, () => req.destroy(new Error("request timed out")));
     req.on("error", reject);
+    if (body) req.write(body);
     req.end();
   });
 };
@@ -179,3 +193,27 @@ const fetchOnce = async (
 // caller needing to know the SSRF-guard internals.
 export const safeGot = async (url: string, extraOpts: Record<string, any> = {}): Promise<any> =>
   fetchOnce(url, MAX_REDIRECTS, extraOpts);
+
+// POST JSON to a user-supplied URL under the same SSRF guard. Used for
+// merchant webhooks, whose URL is set by whoever created the invoice — and
+// POST /invoice takes `optional` auth, so that is anyone. Without this the
+// delivery was a plain got.post() to an arbitrary host, reachable by creating
+// an invoice pointed at an internal address and paying it a single sat.
+export const safePost = async (
+  url: string,
+  json: unknown,
+  extraOpts: Record<string, any> = {},
+): Promise<any> => {
+  const body = JSON.stringify(json);
+  return fetchOnce(url, MAX_REDIRECTS, {
+    ...extraOpts,
+    method: "POST",
+    body,
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+      "content-length": Buffer.byteLength(body),
+      ...extraOpts.headers,
+    },
+  });
+};
