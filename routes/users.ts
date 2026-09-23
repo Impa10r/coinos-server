@@ -316,8 +316,17 @@ export default {
 
     user.twofa = false;
     await s(`user:${id}`, user);
-    emit(username, "user", pick(user, whitelist));
-    emit(username, "otpsecret", user.otpsecret);
+    // Sockets are keyed by the JWT's `id` claim, which is always the user id
+    // (every jwt.sign in this file signs `{ id: user.id }`), so emitting on
+    // `username` reached store.sockets[username] — never populated, so the
+    // client never saw its own 2FA state change until a reload.
+    //
+    // The companion `emit(username, "otpsecret", user.otpsecret)` is removed
+    // rather than repaired. Nothing consumes it: coinos-ui fetches the secret
+    // from POST /otpsecret, which is pin-gated. Pointing it at the right key
+    // would have started pushing a TOTP secret to every socket the account has
+    // open, to serve no reader.
+    emit(id, "user", pick(user, whitelist));
     l("disabled 2fa", username);
     return c.json({});
   },
@@ -332,7 +341,8 @@ export default {
       if (isValid) {
         user.twofa = true;
         await s(`user:${id}`, user);
-        emit(username, "user", pick(user, whitelist));
+        // See disable2fa: sockets are keyed by user id, not username.
+        emit(id, "user", pick(user, whitelist));
       } else {
         return c.json("Invalid token", 500);
       }
