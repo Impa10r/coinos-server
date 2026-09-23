@@ -974,12 +974,19 @@ export default {
       // sub-account's balance:/pending: keys unconditionally, so a guard that
       // only checked the main account let a user with funds parked in a
       // sub-account pass and silently destroy them.
-      const aids = await db.lRange(`${id}:accounts`, 0, -1);
+      // Read the LEDGER, not redis. `balance:` and `pending:` keys have not
+      // been written since balances moved to TigerBeetle — lib/migrate.ts
+      // copied them across once and nothing has updated them since. So this
+      // guard summed a dead source: for any account created after that
+      // migration the keys are absent, the total came out 0, and a user with
+      // real funds could delete their account and destroy them. Exactly the
+      // failure the comment above describes, one layer further down.
+      const aids = (await db.lRange(`${id}:accounts`, 0, -1)) as string[];
       if (!aids.includes(id)) aids.push(id);
       let total = 0;
       for (const aid of aids) {
-        total += Number(await db.get(`balance:${aid}`)) || 0;
-        total += Number(await db.get(`pending:${aid}`)) || 0;
+        total += (await getBalance(aid)) || 0;
+        total += (await getPending(aid)) || 0;
       }
       if (total > 10000)
         fail("Withdraw your balance before deleting your account");
@@ -1495,6 +1502,13 @@ export default {
       } else {
         fail("account not found");
       }
+
+      // Deleting the account record orphans its TigerBeetle balance: the id
+      // disappears from the user's accounts list, so nothing can list it or
+      // spend from it again. deleteSelf refuses for exactly this reason and
+      // this sibling had no guard at all. Same dust threshold.
+      const held = ((await getBalance(id)) || 0) + ((await getPending(id)) || 0);
+      if (held > 10000) fail("Withdraw this account's balance before deleting it");
 
       try {
         const node = rpc({ ...config[account.type], wallet: id });

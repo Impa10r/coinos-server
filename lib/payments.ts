@@ -534,7 +534,11 @@ export const debit = async ({
   // balance write. Log loudly with full context so the exact vector is greppable
   // (SECURITY: negative balance) instead of surfacing days later as a stuck
   // negative account.
-  const postBal = Number.parseInt(String((await db.get(`balance:${aid}`)) ?? "0"));
+  // Same stale-source problem as deleteSelf's guard: `balance:` keys are not
+  // written any more, so this read returned 0 for every account created since
+  // the TigerBeetle migration and the check below could never fire. Ask the
+  // ledger that actually holds the balance.
+  const postBal = await getBalance(aid);
   if (postBal < 0)
     err(
       `SECURITY: negative balance ${postBal} after debit user=${user?.username} aid=${aid} amount=${amount} tip=${tip} fee=${fee} ourfee=${ourfee} type=${type} hash=${hash}`,
