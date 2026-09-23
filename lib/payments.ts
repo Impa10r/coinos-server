@@ -1119,6 +1119,8 @@ export const sendOnchain = async (params) => {
     return sendNonCustodial(params);
   }
 
+  const supplied = !!hex;
+
   let buildResult;
   if (!hex) {
     buildResult = await build(params);
@@ -1129,6 +1131,30 @@ export const sendOnchain = async (params) => {
   const node = rpc(config[type]);
   const isBitcoin = type === PaymentType.bitcoin;
   let { txid } = tx;
+
+  // Only sign a transaction WE composed for this account. Without this the hot
+  // wallet signs whatever raw hex is posted to /bitcoin/send, and the only
+  // things between an arbitrary transaction and the chain are the debit
+  // arithmetic below and the weSpent guard on the credit side. This is the
+  // outer layer, so an unrecognized tx never reaches signRawTransactionWithWallet
+  // and never locks our UTXOs on its way to failing.
+  //
+  // Receipts survive client-side signing: build() returns an unsigned segwit
+  // tx and witness data does not change the txid, so the self-custody path —
+  // which posts back hex it finalized itself — matches the same receipt.
+  //
+  // Not single-use. A replay of the identical tx is already stopped by
+  // inflight / lockUnspent / testMempoolAccept, and burning the receipt would
+  // break a legitimate retry after a transient failure.
+  //
+  // Deliberately after the sendNonCustodial branch above: that path never asks
+  // the hot wallet to sign anything — the account holder signs with their own
+  // key and we only broadcast — so there is no server key to protect there,
+  // and requireAccount already stops it debiting an account it doesn't own.
+  if (supplied) {
+    const builder = await db.get(`build:${txid}`);
+    if (builder !== aid) fail("unrecognized tx");
+  }
   let sendLockKey: string | undefined;
   let locked = false;
 
@@ -2009,7 +2035,12 @@ export const build = async ({ aid, amount, address, feeRate, subtract, user }) =
   }
 
   const inputs = [];
-  const { vin } = await node.decodeRawTransaction(tx.hex);
+  const { vin, txid: built } = await node.decodeRawTransaction(tx.hex);
+
+  // Receipt for sendOnchain(): this account composed this exact transaction.
+  // Bound to aid so one account can't replay another's build, and short-lived
+  // so a hex can't be banked for later.
+  await db.set(`build:${built}`, aid, { EX: 3600 });
 
   for (const { txid, vout } of vin) {
     const rawTx = await node.getRawTransaction(txid);
