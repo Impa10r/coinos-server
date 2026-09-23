@@ -296,7 +296,17 @@ if (process.env.INTEGRATION) {
     line: () => "test:0",
   }));
   mock.module("$lib/notifications", () => ({ notify: () => {}, nwcNotify: () => {} }));
-  mock.module("$lib/webhooks", () => ({ callWebhook: mock(() => {}) }));
+  // A spy that WRAPS the real callWebhook rather than replacing it.
+  // forward.test.ts and onchain.test.ts need .mockClear()/.toHaveBeenCalled();
+  // webhook-tls.test.ts needs the real HTTP behaviour, because the thing worth
+  // testing is that it refuses an untrusted certificate while carrying a
+  // merchant's shared secret. Replacing it with a no-op made that untestable.
+  //
+  // Imported here, after the logging mock above, so the real module binds the
+  // mocked logger. It returns early unless the invoice carries a `webhook`
+  // url, and no fixture sets one, so nothing reaches the network by accident.
+  const { callWebhook: realCallWebhook } = await import("$lib/webhooks");
+  mock.module("$lib/webhooks", () => ({ callWebhook: mock(realCallWebhook) }));
   mock.module("$lib/sockets", () => ({
     emit: mock(() => {}),
     sendHeartbeat: () => {},
