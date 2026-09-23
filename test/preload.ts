@@ -495,6 +495,11 @@ if (process.env.INTEGRATION) {
       fiat: (n: number, r: number) => (n * r) / SATS,
       f: (s: any) => String(s),
       getClientIp: () => "127.0.0.1",
+      // lib/app.ts imports this, so the module cannot load without it. The
+      // real one normalizes an IP to the unit banIp() stores — /64 for IPv6,
+      // the address itself for IPv4, null for shared infrastructure. Nothing
+      // under test exercises the normalization, so pass the address through.
+      banKey: (ip: string) => ip ?? null,
       pick: (O: any, K: string[]) => K.reduce((o: any, k: string) => ((o[k] = O[k]), o), {}),
       prod: false,
       uniq: (a: any[], k: any) => [...new Map(a.map((x: any) => [k(x), x])).values()],

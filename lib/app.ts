@@ -159,14 +159,40 @@ if (prod) {
   }, 5000);
 }
 
-// Never log plaintext passwords. Redact password fields from request bodies
-// before they reach the request log.
-const REDACT_FIELDS = ["password", "confirm", "secret", "otpsecret"];
-const redactBody = (body: any) => {
-  if (!body || typeof body !== "object") return body;
+// Never log plaintext credentials. This MUST recurse: the previous version
+// only redacted top-level keys, and POST /signup posts {user:{password}} —
+// one level down — so every registration wrote its plaintext password to the
+// request log. Verified by posting a marker password and finding it in `req`.
+// `pin`/`newpin` were not on the list at all, and POST /pin, POST /user and
+// POST /take all carry one. Anything nested inside an array is covered too.
+// Depth is bounded so a pathological body can't spin here.
+const REDACT_FIELDS = new Set([
+  "password",
+  "newpassword",
+  "confirm",
+  "pin",
+  "newpin",
+  "secret",
+  "otpsecret",
+  "nsec",
+  "seed",
+  "privkey",
+  "mnemonic",
+]);
+export const redactBody = (body: any, depth = 0): any => {
+  if (!body || typeof body !== "object" || depth > 6) return body;
+  if (Array.isArray(body)) return body.map((v) => redactBody(v, depth + 1));
   const copy: any = { ...body };
-  for (const field of REDACT_FIELDS)
-    if (field in copy) copy[field] = "[redacted]";
+  for (const k of Object.keys(copy)) {
+    if (REDACT_FIELDS.has(k)) {
+      // Leave absent/empty values alone so the log still distinguishes "no pin
+      // was sent" from "a pin was sent and hidden".
+      if (copy[k] !== undefined && copy[k] !== null && copy[k] !== "")
+        copy[k] = "[redacted]";
+    } else if (copy[k] && typeof copy[k] === "object") {
+      copy[k] = redactBody(copy[k], depth + 1);
+    }
+  }
   return copy;
 };
 
