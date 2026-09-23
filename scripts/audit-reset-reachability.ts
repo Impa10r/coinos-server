@@ -54,13 +54,35 @@ if (names) {
     inspect(u);
   }
 } else {
+  // Collect the canonical keys first, then fetch in concurrent batches. One
+  // round trip per key is fine for a handful of named accounts and far too
+  // slow for a whole user base — the first version of this ran for minutes
+  // with no output and looked hung.
+  const keys: string[] = [];
   for await (const k of scan("user:*")) {
     const id = (k as string).slice("user:".length);
-    // Only canonical records; skip the username/pubkey pointer keys.
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-/.test(id)) continue;
-    const u = await g(k);
-    if (!u || typeof u !== "object") continue;
-    inspect(u);
+    // Anchored, not a prefix test. `user:*` also matches sub-keys like
+    // `user:<uuid>:funds`, which is a SET — and `<uuid>:funds` still starts
+    // with 8 hex and a dash, so a prefix test let it through and db.get() then
+    // died with WRONGTYPE, taking the whole scan with it. Match a complete
+    // uuid and nothing else; that also skips the username and pubkey pointers.
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) continue;
+    keys.push(k as string);
+  }
+  console.error(`  ${keys.length} user records to check...`);
+
+  const BATCH = 500;
+  for (let i = 0; i < keys.length; i += BATCH) {
+    const slice = keys.slice(i, i + BATCH);
+    const users = await Promise.all(
+      // One odd key must not end the audit.
+      slice.map((k) => g(k).catch(() => null)),
+    );
+    for (const u of users) {
+      if (!u || typeof u !== "object") continue;
+      inspect(u);
+    }
+    console.error(`  ${Math.min(i + BATCH, keys.length)}/${keys.length}`);
   }
 }
 

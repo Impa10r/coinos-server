@@ -32,7 +32,11 @@ for await (const batch of db.scanIterator({ MATCH: "user:*", COUNT: 2000 })) {
   const keys = Array.isArray(batch) ? batch : [batch];
   for (const key of keys) {
   const uid = (key as string).slice("user:".length);
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-/.test(uid)) continue; // skip username pointers
+  // Anchored: `user:*` also matches `user:<uuid>:funds` and friends, whose
+  // suffix still starts with 8 hex and a dash. A prefix test let those through
+  // and then found no `<that>:payments` list — reporting them as wiped
+  // accounts, in a report whose whole subject is accounts that lost history.
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(uid)) continue;
   scanned++;
 
   const dbLen = Number(await db.lLen(`${uid}:payments`));

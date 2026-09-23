@@ -62,9 +62,12 @@ async function classifyUser(uid: string): Promise<"clean" | "recoverable" | "los
 const t0 = Date.now();
 outer: for await (const keys of db.scanIterator({ MATCH: "user:*", COUNT: 1000 })) {
   for (const key of keys as unknown as string[]) {
-  // Only the canonical record key user:<uuid> (skip user:<username> pointers).
+  // Only the canonical record key user:<uuid>. Anchored, not a prefix test:
+  // `user:*` also matches sub-keys like `user:<uuid>:funds`, and
+  // `<uuid>:funds` still starts with 8 hex and a dash, so a prefix test
+  // counted those as users and inflated the scan.
   const id = key.slice("user:".length);
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-/.test(id)) continue;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) continue;
   usersScanned++;
   if (!full && usersScanned > sampleN) break outer;
 
