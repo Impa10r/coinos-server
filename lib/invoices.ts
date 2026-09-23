@@ -224,6 +224,13 @@ export const generate = async ({ invoice, user }) => {
     text = bip21(hash, invoice);
     await db.sAdd("watching", hash);
   } else if (type === PaymentType.liquid) {
+    // Kill switch. Hiding Liquid in the UI (coinos-ui's InvoiceTypes.svelte
+    // comments the option out) removes the entry point and nothing else: the
+    // server still issues addresses to anyone who asks for type "liquid", and
+    // still credits what arrives at them. This is the half that actually
+    // stops it. Clear `liquid:deposits:disabled` to re-enable.
+    if (await g("liquid:deposits:disabled"))
+      fail("Liquid deposits are temporarily disabled");
     address_type ||= "blech32";
     hash = await lq.getNewAddress({ address_type });
     text = bip21(hash, invoice);

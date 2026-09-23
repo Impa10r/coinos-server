@@ -824,6 +824,16 @@ export default {
         if (!address) continue;
         if (category === "send") continue;
 
+        // The other half of the kill switch: addresses handed out before it
+        // was set are still out there and still receive. Refusing to credit
+        // is what makes "Liquid deposits are off" true rather than merely
+        // advertised. Sends keep their confirmation bookkeeping below — this
+        // only blocks incoming.
+        if (type === PaymentType.liquid && (await g("liquid:deposits:disabled"))) {
+          warn("liquid deposit blocked (disabled)", txid, vout, sats(amount), address);
+          continue;
+        }
+
         let isUsdt = false;
         if (type === PaymentType.liquid) {
           const isLbtc = asset === config.liquid.btc;
