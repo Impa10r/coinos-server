@@ -102,6 +102,22 @@ export default {
     try {
       const body = await c.req.json();
       const { address, message, type = "bitcoin" } = body;
+      const user = c.get("user");
+
+      // Sign only under an address the CALLER owns. Users hold no per-user
+      // keys in this custodial design — every address belongs to the server
+      // hot wallet — so without this any authenticated account could have the
+      // node sign an arbitrary message under any address the wallet controls:
+      // another user's deposit address, a change address, or a cold-storage
+      // address published as ours. That is a proof-of-control forgery
+      // primitive, and it needs no more than an account.
+      //
+      // The legitimate flow mints a fresh invoice address for the caller and
+      // posts that back, so it always satisfies this.
+      const invoice = await getInvoice(address);
+      if (!invoice || (invoice.uid !== user?.id && invoice.aid !== user?.id))
+        fail("unauthorized");
+
       const node = rpc(config[type]);
 
       if (config[type].walletpass)
