@@ -6,17 +6,20 @@ import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
 import { getCookie } from "hono/cookie";
 import jwt from "jsonwebtoken";
-import { pino } from "pino";
 
 const app = new Hono();
 
-// Off unless config.requestLog is set — see the note there. Constructing the
-// destinations lazily matters: pino.destination() creates and holds the file
-// open, so building them unconditionally would recreate `req` and `res` the
-// moment the app restarts, even with logging disabled.
-const requestLog = !!(config as any).requestLog;
-const reqLogger = requestLog ? pino((pino as any).destination("req")) : null;
-const resLogger = requestLog ? pino((pino as any).destination("res")) : null;
+// There is no request/response file logging. `req` and `res` were pino
+// destinations that nothing read, nothing rotated and nothing bounded: on one
+// deployment they reached 42 MB and 111 MB. `req` held the full body of every
+// non-GET request — memos, addresses, amounts, nostr events, each tied to a
+// username and IP — and, until the redaction was fixed, plaintext signup
+// passwords for 138 accounts.
+//
+// The app's own logging (lib/logging.ts -> stdout, capped by compose.yml at
+// 100m x 5) is what is actually read. If body-level capture is ever needed for
+// an incident, take it from a proxy in front of the app rather than
+// accumulating it here for ever.
 
 // IP blacklist — the app-level enforcement layer for the `cf:banned` redis
 // set that lib/auth.ts's banIp() maintains. Checked first, before CORS/rate-
@@ -163,115 +166,6 @@ if (prod) {
     for (const [k, v] of strictLimits) if (now >= v.reset) strictLimits.delete(k);
   }, 5000);
 }
-
-// Never log plaintext credentials. This MUST recurse: the previous version
-// only redacted top-level keys, and POST /signup posts {user:{password}} —
-// one level down — so every registration wrote its plaintext password to the
-// request log. Verified by posting a marker password and finding it in `req`.
-// `pin`/`newpin` were not on the list at all, and POST /pin, POST /user and
-// POST /take all carry one. Anything nested inside an array is covered too.
-// Depth is bounded so a pathological body can't spin here.
-const REDACT_FIELDS = new Set([
-  "password",
-  "newpassword",
-  "confirm",
-  "pin",
-  "newpin",
-  "secret",
-  "otpsecret",
-  "nsec",
-  "seed",
-  "privkey",
-  "mnemonic",
-]);
-export const redactBody = (body: any, depth = 0): any => {
-  if (!body || typeof body !== "object" || depth > 6) return body;
-  if (Array.isArray(body)) return body.map((v) => redactBody(v, depth + 1));
-  const copy: any = { ...body };
-  for (const k of Object.keys(copy)) {
-    if (REDACT_FIELDS.has(k)) {
-      // Leave absent/empty values alone so the log still distinguishes "no pin
-      // was sent" from "a pin was sent and hidden".
-      if (copy[k] !== undefined && copy[k] !== null && copy[k] !== "")
-        copy[k] = "[redacted]";
-    } else if (copy[k] && typeof copy[k] === "object") {
-      copy[k] = redactBody(copy[k], depth + 1);
-    }
-  }
-  return copy;
-};
-
-// Request logging
-app.use("*", async (c, next) => {
-  if (!requestLog) return next();
-
-  const start = Date.now();
-  const url = c.req.path;
-
-  const ignore = [
-    "/ws",
-    "/me",
-    "/confirm",
-    "/public",
-    "/rates",
-    "/challenge",
-    "/rate",
-    "/lnurlp",
-    "/subscriptions",
-    "/accounts",
-    "/contacts",
-  ];
-
-  // Match a whole path segment, not a raw prefix. `startsWith` silently ate
-  // any route beginning with one of these strings — /melt was excluded from
-  // the request log entirely because "/melt".startsWith("/me"), and that
-  // endpoint moves money. Every intended entry still matches: "/public" still
-  // covers /public/x, "/lnurlp" still covers /lnurlp/alice.
-  const ignored = (path: string) => url === path || url.startsWith(`${path}/`);
-
-  const shouldLog =
-    !ignore.some(ignored) &&
-    !(c.req.method === "GET" && (url === "/users" || url.startsWith("/users/")));
-
-  if (shouldLog) {
-    const xff = c.req.header("x-forwarded-for");
-    const forwardedIp = xff?.split(",")[0]?.trim();
-    const ip = c.req.header("cf-connecting-ip") || forwardedIp || (c.env as any)?.ip || "unknown";
-
-    let body;
-    // Only parse body for non-GET requests
-    if (c.req.method !== "GET" && c.req.method !== "HEAD") {
-      try {
-        body = await c.req.raw.clone().json();
-      } catch {}
-    }
-
-    reqLogger?.info({
-      method: c.req.method,
-      url,
-      ip,
-      query: c.req.query(),
-      body: redactBody(body),
-      user: (c.get("user" as never) as any)?.username,
-    });
-  }
-
-  await next();
-
-  const rawCookies = c.req.header("cookie") || "";
-  const cookies: any = rawCookies.split(";").reduce((acc, cookie) => {
-    const [key, value] = cookie.split("=").map((s) => s.trim());
-    if (key && value) acc[key] = value;
-    return acc;
-  }, {});
-
-  resLogger?.info({
-    url,
-    statusCode: c.res.status,
-    durationMs: Date.now() - start,
-    username: cookies.username,
-  });
-});
 
 // Error handler
 app.onError((err, c) => {
