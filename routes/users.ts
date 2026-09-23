@@ -476,7 +476,10 @@ export default {
         "threshold",
         "tip",
         "tokens",
-        "twofa",
+        // "twofa" deliberately absent. It used to be assignable here, so
+        // POST /user with twofa:false turned the second factor off without
+        // the TOTP that disable2fa() requires — the same state change reachable
+        // two ways, one of them checked. enable2fa/disable2fa are the paths.
       ];
 
       // Only when the address actually CHANGES. This was a presence check, and
@@ -736,7 +739,7 @@ export default {
   async nostrAuth(c) {
     try {
       const body = await c.req.json();
-      const { event, challenge, twofa: _twofa, recaptcha } = body;
+      const { event, challenge, twofa, recaptcha } = body;
       const ip = c.req.header("cf-connecting-ip");
       const recaptchaOk = await verifyRecaptcha(recaptcha, c, body);
       if (!recaptchaOk) {
@@ -769,6 +772,27 @@ export default {
         user.banner = sanitizeImageUrl(k0.banner);
         user.about = k0.about;
         await s(`user:${user.id}`, user);
+      }
+
+      // Second factor, the same gate login() and authKeyLogin() apply. This
+      // path had none: it accepted a `twofa` field and discarded it
+      // (`twofa: _twofa`), so an account with 2FA enabled could be entered
+      // with a nostr signature alone. The nostr key is a separate, lower-
+      // assurance credential — typically sitting in a browser extension —
+      // and it is not what the second factor was meant to be second to.
+      //
+      // coinos-ui already expects this: its nostr login action has a branch
+      // for a 401 whose body starts with "2fa" (login/+page.server.ts), which
+      // drives the code prompt. The client was written against a check the
+      // server never made.
+      //
+      // A just-registered user cannot have twofa set, so this only affects
+      // accounts that turned it on.
+      if (
+        user.twofa &&
+        (typeof twofa === "undefined" || !authenticator.check(twofa, user.otpsecret))
+      ) {
+        return c.json("2fa required", 401);
       }
 
       const { username } = user;

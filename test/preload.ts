@@ -464,9 +464,21 @@ if (process.env.INTEGRATION) {
           return null;
         }
       },
+      // Mirrors lib/utils.ts's getUser, including the pointer hop: a
+      // `user:<username>` / `user:<pubkey>` key holds the uid as a string, and
+      // the real function follows it to the record. This mock returned the
+      // bare uid string, so any handler that looked a user up by name or key
+      // got a string where it expected an object and failed somewhere else.
       getUser: async (username: string) => {
-        const raw = kv()[`user:${username}`];
-        return raw ? JSON.parse(raw) : null;
+        const k = username?.replace(/\s/g, "").toLowerCase();
+        const raw = kv()[`user:${k}`];
+        if (!raw) return null;
+        let user = JSON.parse(raw);
+        if (typeof user === "string") {
+          const rec = kv()[`user:${user}`];
+          user = rec ? JSON.parse(rec) : null;
+        }
+        return user;
       },
       getAccount: async () => null,
       link: (id: string) => `http://test/${id}`,
