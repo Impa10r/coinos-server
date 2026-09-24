@@ -1,6 +1,6 @@
 import config from "$config";
 import api from "$lib/api";
-import { evictUser, requirePin } from "$lib/auth";
+import { adminpassMatches, evictUser, requirePin } from "$lib/auth";
 import { archive, db, g, gf, gfAll, s, sa } from "$lib/db";
 import { getTx } from "$lib/esplora";
 import { generate, getUserOffer } from "$lib/invoices";
@@ -1029,7 +1029,7 @@ export default {
       if (typeof secret !== "string" || !secret) {
         return c.json({ error: "missing secret" }, 400);
       }
-      if (!config.adminpass || secret !== config.adminpass) {
+      if (!adminpassMatches(secret)) {
         return c.json({ error: "unauthorized" }, 401);
       }
       await s("freeze", true);

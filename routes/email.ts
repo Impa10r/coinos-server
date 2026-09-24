@@ -23,7 +23,12 @@ export default {
         })
         .json()) as any;
 
-      if (success || (!!config.adminpass && response === config.adminpass)) {
+      // No adminpass bypass. This endpoint is unauthenticated, and answering
+      // differently for a correct guess made it an online oracle for the master
+      // credential that login() accepts as any user's password — reachable at
+      // the general rate limit, with no account needed. An admin who wants to
+      // reach support can solve a captcha like everyone else.
+      if (success) {
         body.token = undefined;
 
         warn("support request from", email);

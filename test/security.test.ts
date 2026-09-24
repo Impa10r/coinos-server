@@ -369,3 +369,21 @@ describe("session revocation — a password change ends older sessions", () => {
     expect((await fetch(`${API}/payments`, { headers: RO })).status).toBe(200);
   });
 });
+
+describe("adminpass oracle — /email answers the same either way", () => {
+  // POST /email is unauthenticated and used to accept config.adminpass as a
+  // captcha bypass, returning {ok:true} for a correct guess and "failed
+  // captcha" otherwise. Since login() takes adminpass as any account's
+  // password, that made an unauthenticated endpoint an online oracle for a
+  // master credential. The bypass is gone; both answers must now be identical.
+  const send = (token: string) =>
+    post("/email", { email: "probe@example.invalid", message: "probe", token });
+
+  test("a correct adminpass guess is indistinguishable from a wrong one", async () => {
+    const config = (await import("$config")).default as any;
+    const wrong = await send("definitely-not-the-adminpass");
+    const right = await send(String(config.adminpass));
+    expect(right.status).toBe(wrong.status);
+    expect(await right.text()).toBe(await wrong.text());
+  });
+});

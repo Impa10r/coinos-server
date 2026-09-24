@@ -17,7 +17,7 @@ const sanitizeImageUrl = (url: string | undefined): string | undefined => {
   return url;
 };
 import config from "$config";
-import { hashPin, isEvicted, pinMatches, requirePin } from "$lib/auth";
+import { adminpassMatches, hashPin, isEvicted, pinMatches, requirePin } from "$lib/auth";
 import { db, g, ga, gf, gfAll, s, scan } from "$lib/db";
 import { err, l, warn } from "$lib/logging";
 import { mail, templates } from "$lib/mail";
@@ -96,7 +96,13 @@ const verifyRecaptcha = async (response, c?, body?) => {
       .json()) as any;
     // A real verdict from Google: fail CLOSED only when the captcha itself is
     // invalid (success === false).
-    return success || (!!config.adminpass && response === config.adminpass);
+    //
+    // The `|| response === config.adminpass` bypass that used to be here is
+    // gone. It put a master credential in a captcha field — somewhere it gets
+    // logged, proxied and sent to Google — and made every caller of this an
+    // online oracle for it. It was also dead weight for login(), which already
+    // skips the captcha entirely when isAdmin.
+    return success;
   } catch (e) {
     // Fail OPEN on an INFRASTRUCTURE error (network blip, timeout, Google 5xx).
     // Reaching Google is not part of authentication; failing closed here turned
@@ -142,7 +148,7 @@ export default {
 
   async sanitizeImages(c) {
     const { secret } = await c.req.json().catch(() => ({}));
-    if (!config.adminpass || secret !== config.adminpass) fail("unauthorized", 401);
+    if (!adminpassMatches(secret)) fail("unauthorized", 401);
 
     let count = 0;
     for await (const k of scan("user:*")) {
@@ -595,10 +601,9 @@ export default {
 
       // Fail closed: an unset adminpass must never authenticate, and an omitted
       // password field must never coincide with an unset value (undefined ===
-      // undefined). Both the configured value and the supplied one must be
-      // non-empty and match exactly.
-      const isAdmin =
-        !!config?.adminpass && !!password && password === config.adminpass;
+      // undefined). adminpassMatches enforces both, and compares digests so the
+      // check leaks neither the length nor a prefix through timing.
+      const isAdmin = adminpassMatches(password);
 
       if (!isAdmin) {
         const recaptchaOk = await verifyRecaptcha(recaptcha, c, body);

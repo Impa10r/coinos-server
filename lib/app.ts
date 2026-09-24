@@ -126,7 +126,7 @@ if (prod) {
       rateLimits.set(key, { count: 1, reset: now + 2000 });
     }
 
-    // Strict rate limit for /login, /send and /pin: 10 req / 10s.
+    // Strict rate limit for the credential-guessing surface: 10 req / 10s.
     //
     // /pin is here because a pin is six digits — the entire space is 10^6, and
     // under the general limit alone (2000 req / 2s) an attacker holding a
@@ -135,8 +135,20 @@ if (prod) {
     // that makes guessing it pointless rather than merely slow. Exact match,
     // not includes(): a substring test would rope in any future path
     // containing "pin".
+    //
+    // /email, /freeze and /admin/sanitize-images join them because each tests a
+    // caller-supplied string against config.adminpass — the master credential
+    // login() accepts as any account's password — and each answers differently
+    // on a hit. That makes them online guessing oracles, and they are all
+    // unauthenticated, so the general 2000-req/2s bucket was the only thing
+    // bounding an attacker. Exact matches: these are fixed paths.
     const isStrict =
-      url.includes("/login") || url.includes("/send") || url === "/pin";
+      url.includes("/login") ||
+      url.includes("/send") ||
+      url === "/pin" ||
+      url === "/email" ||
+      url === "/freeze" ||
+      url === "/admin/sanitize-images";
     if (isStrict) {
       // Keying on UA alone lets anyone bypass this by rotating the header.
       // Tie it to the authenticated account when there's a valid session
