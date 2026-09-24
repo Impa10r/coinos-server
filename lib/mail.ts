@@ -10,7 +10,6 @@ const Charset = "UTF-8";
 export const templates = {
   verifyEmail: "templates/payments/verify.html",
   paymentReceived: "templates/payments/received.html",
-  passwordReset: "templates/payments/reset.html",
 };
 
 // Two transports, chosen by config rather than by caller.

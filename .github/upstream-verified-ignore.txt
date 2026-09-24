@@ -54,9 +54,12 @@ fb09303ff274a241c28cccc0cd29550f6e59d0b2 # confirm: guard the first-seen deposit
 
 # Landed as a split, not a single pick — d8a361bd bundles eight changes, each
 # verified individually before this entry was added:
-#   admin surface   -> f3ec4c5a (GET /users deliberately KEPT; see the note
-#                      in index.ts — this fork's admin page calls it, and
-#                      users.list self-gates on user.admin)
+#   admin surface   -> f3ec4c5a, then taken further than upstream: GET /users,
+#                      POST /freeze, POST /reset, POST /forgot,
+#                      POST /admin/sanitize-images and the config.adminpass
+#                      master password are all gone, the operator edits redis
+#                      over ssh instead. The "deliberately KEPT" divergence
+#                      this file used to record no longer applies.
 #   redactBody      -> superseded by 1e3b27c6, which removed request/response
 #                      file logging altogether rather than redacting it
 #   requireAccount  -> 94340f38   build receipt -> de621330

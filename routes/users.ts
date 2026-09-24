@@ -18,7 +18,7 @@ const sanitizeImageUrl = (url: string | undefined): string | undefined => {
 };
 import config from "$config";
 import { hashPin, isEvicted, pinMatches, requirePin } from "$lib/auth";
-import { db, g, ga, gf, gfAll, s, scan } from "$lib/db";
+import { db, g, ga, gf, gfAll, s } from "$lib/db";
 import { err, l, warn } from "$lib/logging";
 import { mail, templates } from "$lib/mail";
 import { getNostrUser, getProfile, serverPubkey2 } from "$lib/nostr";
@@ -143,38 +143,6 @@ export default {
       warn("problem fetching user", e.message);
       return c.json(e.message, 500);
     }
-  },
-
-  async list(c) {
-    const user = c.get("user");
-    if (!user.admin) return c.json("unauthorized", 401);
-
-    const users = [];
-
-    for await (const k of scan("user:*")) {
-      const val = await g(k);
-      if (!val || typeof val !== "object" || !val.id || !val.username) continue;
-      const uid = val.id;
-      const u = val;
-
-      u.balance = await getBalance(uid);
-
-      const payments = await db.lRange(`${uid}:payments`, 0, -1);
-
-      let total = 0;
-      for (const pid of payments) {
-        const p = await gf(`payment:${pid}`);
-        if (!p) continue;
-        total += p.amount;
-        if (p.amount < 0) total -= (p.fee || 0) + (p.ourfee || 0) + (p.tip || 0);
-        else total += p.tip || 0;
-      }
-
-      u.expected = total;
-      users.push(u);
-    }
-
-    return c.json(users);
   },
 
   async get(c) {
@@ -1094,30 +1062,6 @@ export default {
       await s(`email:${email.toLowerCase()}`, id);
 
       return c.json(pick(user, fields));
-    } catch (e) {
-      return bail(c, e);
-    }
-  },
-
-  async forgot(c) {
-    const body = await c.req.json();
-    const { email } = body;
-    try {
-      const uid = await g(`email:${email.toLowerCase()}`);
-      const user = await g(`user:${uid}`);
-
-      if (user) {
-        const code = v4();
-        const link = `${process.env.URL}/reset/${code}`;
-        await db.set(`reset:${code}`, uid, { EX: 300 });
-
-        await mail(user, "Password reset", templates.passwordReset, {
-          ...user,
-          link,
-        });
-      }
-
-      return c.json({});
     } catch (e) {
       return bail(c, e);
     }

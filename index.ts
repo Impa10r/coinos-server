@@ -206,7 +206,6 @@ app.post("/account/:id", auth, users.updateAccount);
 app.get("/accounts", auth, users.accounts);
 app.post("/accounts", auth, users.createAccount);
 
-app.get("/users", auth, users.list);
 app.get("/me", auth, users.me);
 app.get("/ro", auth, users.ro);
 app.get("/credits", auth, users.credits);
@@ -219,7 +218,6 @@ app.post("/delete", auth, users.deleteSelf);
 app.post("/upload/:type", auth, users.upload);
 app.get("/verify/:code", users.verify);
 app.post("/request", auth, users.request);
-app.post("/forgot", users.forgot);
 app.post("/login", users.login);
 app.post("/flash", users.flash);
 app.get("/challenge", users.challenge);
@@ -272,8 +270,18 @@ app.post("/shopify/:id", shopify);
 // account, and neither flag was ever read: `unlimited` was written and nothing
 // consulted it, `hidepay` only appeared in output projections. Admin-gated
 // endpoints that change nothing are surface without a feature behind them.
-// GET /users is deliberately KEPT — unlike upstream, this fork's admin page
-// (coinos-ui /admin) calls it.
+// POST /forgot removed with POST /reset. It issued a `reset:<code>` key and
+// mailed a link to /reset — a route that already 404'd for every non-admin
+// caller, and whose handler never validated the code anyway (it reset by
+// username and deleted the code afterwards). Nothing that worked was lost;
+// what went is an endpoint that mailed people a dead link. Password recovery
+// is an operator action against redis.
+//
+// GET /users removed. It full-scanned user:*, and for every account read the
+// whole payments list to total it — an unbounded scan any account with the
+// `admin` flag could trigger. This fork had kept it, diverging from upstream,
+// because coinos-ui's /admin page called it; that page is gone too. Operator
+// reporting is via redis directly.
 // GET /bolt12 removed. It served fixBolt12(), a one-off repair routine that
 // full-scans payment:*, deletes payment records and calls tbSetBalance to
 // subtract from user balances — and it was UNAUTHENTICATED, so anyone who knew
