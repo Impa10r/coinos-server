@@ -2422,13 +2422,18 @@ export const check = async () => {
       }
       const p = await getPayment(pr);
       // Skip payments sendLightning may still be actively driving. xpay retries
-      // for 30s (retry_for: 30), during which listpays can momentarily show all
+      // for up to 60s (retryFor is 30 whitelisted / 60 not), during which
+      // listpays can momentarily show all
       // attempts "failed" before the winning part lands. The old 10s threshold
       // let check() reverse/refund such a payment mid-flight; it then completed,
       // and sendLightning's finalize threw on the deleted record — refunding a
       // payment that actually settled (the LEAKED DEBIT losses). Wait well past
       // the retry window so sendLightning has finished finalize()/reverse() and
-      // removed it from `pending` before check() ever touches it.
+      // removed it from `pending` before check() ever touches it. Keep this at
+      // twice the largest retryFor: it was left at 60s when retryFor for
+      // non-whitelisted users went 30 -> 60, which collapsed the margin to 1x
+      // and put the reversal sweep right on top of xpay's last retry.
+      // COUPLED TO retryFor above — change both together.
       // No record anywhere (main db or archive) means there's nothing left to
       // reconcile — the debit was already reversed or the entry is a stale
       // stray. Drop it: sendLightning now refuses to re-pay an invoice while
@@ -2438,8 +2443,13 @@ export const check = async () => {
         await db.sRem("pending", pr);
         continue;
       }
-      if (Date.now() - p.created < 60000) continue;
-      if (inFlight.has(String(pr))) continue;
+      if (Date.now() - p.created < 120000) continue;
+      // inFlight is keyed on the normalised invstring xpay was called with
+      // (lowercased, whitespace stripped), but `pending` holds the invoice as
+      // the caller supplied it. Compare like for like, or an uppercase-pasted
+      // LNBC... invoice — which the branch above exists to handle — misses the
+      // guard entirely and falls back on the timer alone.
+      if (inFlight.has(String(pr).replace(/\s/g, "").toLowerCase())) continue;
       const { pays } = await outLn.listpays(String(pr));
 
       const failed = !pays.length || pays.every((p) => p.status === "failed");
