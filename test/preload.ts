@@ -403,15 +403,23 @@ if (process.env.INTEGRATION) {
       ),
   }));
 
+  // Spread from the REAL module rather than re-implementing it. fail() and
+  // bail() were hand-copied here, and drifted the moment lib/utils.ts changed:
+  // fail() started tagging a refusal with a status and bail() started reading
+  // it off the error, while this mock still threw a bare Error and answered a
+  // flat 500 — so every test on a refusal path asserted the mock's behaviour,
+  // not the app's. (The comment on bail below records the same drift happening
+  // once already, during the Fastify->Hono migration.) Only the entries that
+  // genuinely need the test store are overridden, and they come after the
+  // spread so they still win.
+  const realUtils = await import("$lib/utils");
   mock.module("$lib/utils", () => {
     const SATS = 100_000_000;
     const kv = () => globalThis.__testStore.kvStore;
     return {
+      ...realUtils,
       SATS,
       btc: (n: number) => Number.parseFloat((n / SATS).toFixed(8)),
-      fail: (msg: string) => {
-        throw new Error(msg);
-      },
       fmt: (n: number) => String(n),
       formatReceipt: () => {},
       getInvoice: async (hash: string) => {
@@ -468,10 +476,6 @@ if (process.env.INTEGRATION) {
       sats: (n: number) => Math.round(n * SATS),
       sleep: async () => {},
       t: () => ({ insufficientFunds: "Insufficient funds" }),
-      // Matches lib/utils.ts's bail, which became Hono-shaped in the Fastify
-      // migration; this mock still had the old res.code().send() form, so any
-      // test reaching a bail() path died on it rather than seeing the refusal.
-      bail: (c: any, msg: string) => c.json(msg, 500),
       bip21: () => "",
       fields: [],
       nada: () => {},

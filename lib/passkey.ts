@@ -103,11 +103,11 @@ export async function verifyPasskeyLogin(response: any, challengeId: string, ori
   if (!userId) fail("Passkey not recognized");
 
   const user = await g(`user:${userId}`);
-  if (!user) fail("User not found");
+  if (!user) fail("User not found", 404);
 
   const passkeys = user.passkeys || [];
   const passkey = passkeys.find((p: any) => p.credentialID === response.id);
-  if (!passkey) fail("Passkey not found");
+  if (!passkey) fail("Passkey not found", 404);
 
   const expectedChallenge = await db.get(`challenge:passkey:${challengeId}`);
   if (!expectedChallenge) fail("Challenge expired");

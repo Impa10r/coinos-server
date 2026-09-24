@@ -5,8 +5,22 @@ import net from "node:net";
 
 const { URL } = process.env;
 
-export const fail = (msg) => {
-  throw new Error(msg);
+// A deliberate refusal, not a server fault. The status rides on the error so
+// bail() can answer with it: 400 by default, 401/404 where the caller passes
+// one. Anything thrown that is NOT a fail() — a TypeError, a failed rpc, a bad
+// JSON body — carries no status and stays a 500, which is what makes a 500 in
+// the logs mean something again.
+export class Refusal extends Error {
+  status: number;
+  constructor(msg: string, status = 400) {
+    super(msg);
+    this.name = "Refusal";
+    this.status = status;
+  }
+}
+
+export const fail = (msg, status = 400) => {
+  throw new Refusal(msg, status);
 };
 
 // Best-effort real client IP: Cloudflare's header when the request came
@@ -133,7 +147,13 @@ export const wait = async (f, s = 300, n = 50) => {
 
 export const prod = process.env.NODE_ENV === "production";
 
-export const bail = (c, msg) => c.json(msg, 500);
+// Takes the caught error itself, so a Refusal keeps its status. A bare string
+// is a deliberate refusal written inline, so it answers 400 rather than 500.
+export const bail = (c, e, status?: number) =>
+  c.json(
+    typeof e === "string" ? e : (e?.message ?? "error"),
+    status ?? (typeof e === "string" ? 400 : (e?.status ?? 500)),
+  );
 
 export const SATS = 100000000;
 export const sats = (n) => Math.round(n * SATS);

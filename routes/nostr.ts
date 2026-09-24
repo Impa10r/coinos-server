@@ -48,7 +48,7 @@ export default {
     try {
       return c.json(await getMlsUsers());
     } catch (e) {
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -122,7 +122,7 @@ export default {
       return c.json(event);
     } catch (e) {
       warn("event failed", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -176,7 +176,7 @@ export default {
       return c.json(thread);
     } catch (e) {
       warn("thread failed", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -208,7 +208,7 @@ export default {
       return c.json(zaps.filter((z) => z.amount > 0));
     } catch (e) {
       warn("zaps failed", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -229,7 +229,7 @@ export default {
       return c.json({});
     } catch (e) {
       warn("publish failed", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -254,7 +254,7 @@ export default {
       return c.json(events);
     } catch (e) {
       warn("events failed", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -294,7 +294,7 @@ export default {
       return c.json(follows);
     } catch (e) {
       warn("follows fail", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -326,7 +326,7 @@ export default {
       return c.json(followers);
     } catch (e) {
       warn("followers failed", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -336,7 +336,7 @@ export default {
       return c.json(await getCount(pubkey));
     } catch (e) {
       warn("count failed", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -419,7 +419,7 @@ export default {
       const pubkey = event.tags.find((t) => t[0] === "p")[1];
       const content = JSON.stringify(await getProfile(pubkey));
       const callback = await getZapEndpoint({ content } as Event);
-      if (!callback || callback === "null") fail("Lightning address not found");
+      if (!callback || callback === "null") fail("Lightning address not found", 404);
 
       const encodedEvent = encodeURI(JSON.stringify(event));
       const url = `${callback}?amount=${amount}&nostr=${encodedEvent}`;
@@ -428,7 +428,7 @@ export default {
       return c.json(json);
     } catch (e) {
       warn("zap failed", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 };

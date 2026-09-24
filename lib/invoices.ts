@@ -78,7 +78,7 @@ export const generate = async ({ invoice, user }) => {
   let account = aid ? await g(`account:${aid}`) : null;
   if (account && account.uid && account.uid !== user.id) account = null;
   if (!account) account = await g(`account:${user.id}`);
-  if (!account) fail("account not found");
+  if (!account) fail("account not found", 404);
   aid = account.id;
 
   const rates = await g("rates");

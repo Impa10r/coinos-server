@@ -142,7 +142,7 @@ export default {
 
   async sanitizeImages(c) {
     const { secret } = await c.req.json().catch(() => ({}));
-    if (!config.adminpass || secret !== config.adminpass) fail("unauthorized");
+    if (!config.adminpass || secret !== config.adminpass) fail("unauthorized", 401);
 
     let count = 0;
     for await (const k of scan("user:*")) {
@@ -351,7 +351,7 @@ export default {
       return c.json({});
     } catch (e) {
       warn("enable2fa failed", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -361,10 +361,10 @@ export default {
     try {
       const authHeader = c.req.header("authorization");
       const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : getCookie(c, "token");
-      if (!token) fail("unauthorized");
+      if (!token) fail("unauthorized", 401);
       const { id: tokid } = jwt.verify(token, config.jwt);
       l("updating user", user.username, tokid);
-      if (user.id !== tokid) fail("unauthorized");
+      if (user.id !== tokid) fail("unauthorized", 401);
 
       const { confirm, password, pin, newpin } = body;
       const username = body?.username?.toLowerCase().replace(/\s/g, "");
@@ -561,7 +561,7 @@ export default {
       return c.json({ user: pick(user, whitelist) });
     } catch (e) {
       warn("failed to update", user.username, e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -714,7 +714,7 @@ export default {
 
       const username = rawUsername.toLowerCase().replace(/\s/g, "");
       let user = await getUser(username);
-      if (!user) fail("User not found");
+      if (!user) fail("User not found", 404);
       if (!user.authPubkey || user.authPubkey !== event.pubkey) fail("Auth key mismatch");
 
       if (
@@ -828,7 +828,7 @@ export default {
       const subscriptions = await db.sMembers(`${user.id}:subscriptions`);
       return c.json(subscriptions);
     } catch (e) {
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -841,7 +841,7 @@ export default {
       return c.json(subscription);
     } catch (e) {
       warn("subscription failed", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -854,7 +854,7 @@ export default {
       return c.json(subscription);
     } catch (e) {
       warn("deleteSubscription failed", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -868,7 +868,7 @@ export default {
       if (!password) fail("password not provided");
       return c.json(await Bun.password.verify(password, user.password));
     } catch (e) {
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1101,7 +1101,7 @@ export default {
       } catch {}
       return c.json({ deleted: true });
     } catch (e) {
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1127,7 +1127,7 @@ export default {
       id = await g(`user:${username.toLowerCase().replace(/\s/g, "")}`);
       user = await g(`user:${id}`);
 
-      if (!user) fail("user not found");
+      if (!user) fail("user not found", 404);
 
       warn("password reset", user.username, code, c.req.header("cf-connecting-ip"));
 
@@ -1153,7 +1153,7 @@ export default {
       return c.json(pick(user, whitelist));
     } catch (e) {
       err("password reset failed", e.message, c.req.header("cf-connecting-ip"));
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1206,7 +1206,7 @@ export default {
       // silently, so a refused request showed the user an error with nothing
       // on the server side to explain it.
       warn("email verification request failed", user?.username, email, e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1223,7 +1223,7 @@ export default {
 
       return c.json(pick(user, fields));
     } catch (e) {
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1247,7 +1247,7 @@ export default {
 
       return c.json({});
     } catch (e) {
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1267,7 +1267,7 @@ export default {
       return c.json(account);
     } catch (e: any) {
       warn("account failed", id, e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1319,7 +1319,7 @@ export default {
       return c.json(accounts.reverse());
     } catch (e) {
       warn("accounts failed", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1401,7 +1401,7 @@ export default {
 
       return c.json(account);
     } catch (e) {
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1417,7 +1417,7 @@ export default {
     // for a reason the caller should see, and that escaped as a bare 500.
     try {
       const pos = await db.lPos(`${uid}:accounts`, id);
-      if (pos == null) fail("account not found");
+      if (pos == null) fail("account not found", 404);
 
       const account = await g(`account:${id}`);
       if (name !== undefined) account.name = name;
@@ -1448,7 +1448,7 @@ export default {
       return c.json(account);
     } catch (e: any) {
       warn("updateAccount failed", id, e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1460,18 +1460,18 @@ export default {
       l("deleteAccount", id, "uid:", uid);
       const account = await g(`account:${id}`);
       l("deleteAccount account:", !!account, "type:", account?.type);
-      if (!account) fail("account not found");
+      if (!account) fail("account not found", 404);
 
       // Support both list and set storage for accounts
       const keyType = await db.type(`${uid}:accounts`);
       if (keyType === "list") {
         const pos = await db.lPos(`${uid}:accounts`, id);
-        if (pos == null) fail("account not found");
+        if (pos == null) fail("account not found", 404);
       } else if (keyType === "set") {
         const isMember = await db.sIsMember(`${uid}:accounts`, id);
-        if (!isMember) fail("account not found");
+        if (!isMember) fail("account not found", 404);
       } else {
-        fail("account not found");
+        fail("account not found", 404);
       }
 
       // Deleting the account record orphans its TigerBeetle balance: the id
@@ -1497,7 +1497,7 @@ export default {
       return c.json({ ok: true });
     } catch (e) {
       warn("deleteAccount failed", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1534,7 +1534,7 @@ export default {
       return c.json({ ok: true });
     } catch (e) {
       err("problem deleting user", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1565,7 +1565,7 @@ export default {
       });
     } catch (e: any) {
       warn("flash failed", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -1580,7 +1580,7 @@ export default {
       // setup) probe this endpoint and treat 404 as "not configured yet, create
       // one" — anything else aborts their whole connection flow.
       if (!app) return c.json({ error: "connection not found" }, 404);
-      if (app.uid !== user.id) fail("unauthorized");
+      if (app.uid !== user.id) fail("unauthorized", 401);
 
       const lud16 = `${user.username}@${host}`;
 
@@ -1600,11 +1600,11 @@ export default {
 
       return c.json(app);
     } catch (e: any) {
-      // fail("unauthorized") used to escape to app.onError: the caller got a
+      // fail("unauthorized", 401) used to escape to app.onError: the caller got a
       // bare {ok:false} 500 and it was logged as a server fault, when asking
       // for someone else's connection is a refusal we intend to make.
       warn("app failed", pubkey, user?.username, e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1655,7 +1655,7 @@ export default {
       // this ownership check ineffective for normal NWC keys and allowed an
       // authenticated user to overwrite another connection's configuration.
       let app = await g(`app:${pubkey}`);
-      if (app && uid !== app.uid) fail("Unauthorized");
+      if (app && uid !== app.uid) fail("Unauthorized", 401);
 
       // Rotation is mandatory after a credential disclosure: the NWC pubkey is
       // derived from the bearer secret, so re-registering a retired or
@@ -1738,7 +1738,7 @@ export default {
       return c.json({ nwc });
     } catch (e) {
       warn("updateApp failed", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1751,14 +1751,14 @@ export default {
       const app = await g(`app:${pubkey}`);
       if (app && uid !== app.uid) {
         warn(app.uid, uid);
-        fail("Unauthorized");
+        fail("Unauthorized", 401);
       }
       await db.sRem(`${uid}:apps`, pubkey);
       await db.del(`app:${pubkey}`);
       return c.json({});
     } catch (e) {
       warn("deleteApp failed", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1808,7 +1808,7 @@ export default {
       return c.json(options);
     } catch (e) {
       warn("passkeyRegisterOptions failed", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1824,7 +1824,7 @@ export default {
       return c.json({ ok: true });
     } catch (e) {
       warn("passkeyRegisterVerify failed", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1836,7 +1836,7 @@ export default {
       return c.json(options);
     } catch (e) {
       warn("passkeyLoginOptions failed", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1851,7 +1851,7 @@ export default {
       return c.json({ user: pick(user, whitelist), token });
     } catch (e) {
       warn("passkeyLoginVerify failed", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 

@@ -88,7 +88,7 @@ export default {
       return c.json(r);
     } catch (e) {
       warn("lnurl proxy failed", url, e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -124,7 +124,7 @@ export default {
       const r = await safeGot(url, opts);
       return c.json(r);
     } catch (e) {
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -160,7 +160,7 @@ export default {
       if (v3) return c.json(v3);
 
       const user = await getUser(name);
-      if (!user) fail(`User ${username} not found`);
+      if (!user) fail(`User ${username} not found`, 404);
       const { id: uid } = user;
 
       const metadata = JSON.stringify([
@@ -184,7 +184,7 @@ export default {
     } catch (e) {
       if (!e.message.includes("found"))
         warn("problem generating lnurlp request", username, e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -215,7 +215,7 @@ export default {
       const uid = await g(`lnurl:${id}`);
       const user = await getUser(uid);
 
-      if (!user) fail("user not found");
+      if (!user) fail("user not found", 404);
       let { username } = user;
       username = username.replace(/\s/g, "").toLowerCase();
 
@@ -264,7 +264,7 @@ export default {
       });
     } catch (e) {
       warn("lnurl callback error", id, e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -307,7 +307,7 @@ export default {
       });
     } catch (e) {
       warn("lnurlw request failed", fundId, e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -397,7 +397,7 @@ export default {
     const username = c.req.param("username");
     try {
       const user = await getUser(username);
-      if (!user) fail(`User ${username} not found`);
+      if (!user) fail(`User ${username} not found`, 404);
 
       const invoices = await db.lRange(`${user.id}:invoices`, 0, 10);
       let invoice;
@@ -462,7 +462,7 @@ export default {
     } catch (e) {
       if (!e.message.includes("found"))
         warn("problem generating lnurlp request", username, e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 };

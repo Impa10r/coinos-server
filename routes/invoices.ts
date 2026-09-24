@@ -20,9 +20,9 @@ export default {
         invoice.items ||= [];
       }
       if (invoice) return c.json(invoice);
-      else fail("invoice not found");
+      else fail("invoice not found", 404);
     } catch (e) {
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -46,7 +46,7 @@ export default {
     } catch (e) {
       console.trace();
       err("problem generating invoice", c.get("user")?.username, body.user?.username, e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -57,7 +57,7 @@ export default {
       const { tip, webhook, secret, received: _received } = body.invoice;
 
       let invoice = await gf(`invoice:${id}`);
-      if (!invoice) fail("invoice not found");
+      if (!invoice) fail("invoice not found", 404);
       const user = await g(`user:${invoice.uid}`);
 
       if (typeof tip !== "undefined") {
@@ -75,7 +75,7 @@ export default {
       }
 
       if (webhook && secret) {
-        if (invoice.uid !== c.get("user")?.id) fail("Unauthorized");
+        if (invoice.uid !== c.get("user")?.id) fail("Unauthorized", 401);
         invoice.webhook = webhook;
         invoice.secret = secret;
       }
@@ -86,7 +86,7 @@ export default {
 
       return c.json(invoice);
     } catch (e) {
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -116,7 +116,7 @@ export default {
       // posts that back, so it always satisfies this.
       const invoice = await getInvoice(address);
       if (!invoice || (invoice.uid !== user?.id && invoice.aid !== user?.id))
-        fail("unauthorized");
+        fail("unauthorized", 401);
 
       const node = rpc(config[type]);
 
@@ -126,7 +126,7 @@ export default {
       const signature = await node.signMessage({ address, message });
       return c.json({ signature });
     } catch (e) {
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 };

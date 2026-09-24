@@ -57,7 +57,7 @@ export default {
       return c.json({ id });
     } catch (e) {
       warn("cash save failed", getClientIp(c) ?? "unknown", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -80,7 +80,7 @@ export default {
       // Context, because this route is unauthenticated and every failure here
       // used to log as a bare library message with no route, id, or caller.
       warn("cash get failed", id, getClientIp(c) ?? "unknown", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -107,7 +107,7 @@ export default {
       return c.json({ ok: true });
     } catch (e) {
       warn("cash claim failed", user?.username, e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -139,7 +139,7 @@ export default {
         fail("Amount must be greater than zero");
       const ref = preimage;
       const { lightning: type } = PaymentType;
-      if (user.username !== "mint") fail("unauthorized");
+      if (user.username !== "mint") fail("unauthorized", 401);
       const { id: uid, currency } = user;
       const ourfee = await tbDebit(uid, uid, type, amount || 0, 0, 0, 0, 0, "Insufficient funds");
 
@@ -172,7 +172,7 @@ export default {
 
       return c.json(p);
     } catch (e) {
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -204,7 +204,7 @@ export default {
       return c.json({ id });
     } catch (e) {
       warn("ecash receive failed", c.req.param("id"), getClientIp(c) ?? "unknown", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 };

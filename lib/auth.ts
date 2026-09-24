@@ -101,7 +101,7 @@ const banIp = async (ip: string, reason: string) => {
 // funder, not just the fund's original creator) so it can no longer be
 // withdrawn from or added to. Also clear the fund's manager list: take()'s
 // separate `if (managers.length && !managers.includes(user.id))
-// fail("Unauthorized")` check would otherwise still block a whitelisted ops
+// fail("Unauthorized", 401)` check would otherwise still block a whitelisted ops
 // account from sweeping/cleaning up the fund even though the disabled
 // check's own whitelist exemption lets them past THAT gate — with no
 // managers left, the disabled flag becomes the sole gatekeeper. Scoped to

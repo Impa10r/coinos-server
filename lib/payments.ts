@@ -317,7 +317,7 @@ export const requireAccount = async (user: any, aid?: string) => {
   if (!aid || aid === user?.id) return;
   if ((await db.lPos(`${user?.id}:accounts`, aid)) === null) {
     err(`SECURITY: ${user?.username} tried to act on account ${aid} it does not own`);
-    fail("Unauthorized");
+    fail("Unauthorized", 401);
   }
 };
 

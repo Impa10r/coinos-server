@@ -366,10 +366,10 @@ export default () => {
             // exempts "pubkey not found" from err() for the same reason; this
             // line ran before the throw, so that exemption never covered it.
             l("nwc app not found for pubkey", pubkey.slice(0, 8));
-            fail("pubkey not found");
+            fail("pubkey not found", 404);
           }
           const user = await g(`user:${app.uid}`);
-          if (!user) fail("user not found");
+          if (!user) fail("user not found", 404);
 
           // Forced credential rotation. NWC secrets are bearer credentials, so a
           // suspected disclosure cannot be repaired by changing an account

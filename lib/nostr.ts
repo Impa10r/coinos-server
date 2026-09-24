@@ -218,7 +218,7 @@ export const getNostrUser = async (key) => {
     };
   }
 
-  if (!user) fail("User not found");
+  if (!user) fail("User not found", 404);
 
   if (user.pubkey) user.npub = nip19.npubEncode(user.pubkey);
   user.prompt = !!user.prompt;

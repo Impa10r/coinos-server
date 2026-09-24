@@ -19,10 +19,10 @@ export default {
     const id = c.req.param("id");
     try {
       const item = await g(`item:${id}`);
-      if (!item) fail("Item not found");
+      if (!item) fail("Item not found", 404);
       return c.json(item);
     } catch (e) {
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -43,7 +43,7 @@ export default {
 
       return c.json(item);
     } catch (e) {
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -55,11 +55,11 @@ export default {
     try {
       const n = await db.lRem(`${id}:items`, 0, item.id);
       if (n) db.del(`item:${item.id}`);
-      else fail("item not found");
+      else fail("item not found", 404);
 
       return c.json({});
     } catch (e) {
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -77,7 +77,7 @@ export default {
 
       return c.json({});
     } catch (e) {
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 };

@@ -289,14 +289,13 @@ describe("ro-token — the read-only POS token cannot write merchant config", ()
   // firmware, so a device pulled off a shop counter could repoint the
   // merchant's payment notifications. Matching the resolved route pattern
   // instead closes it without touching what a POS legitimately does.
-  let A: any, RO: any, meId: string, invId: string;
+  let A: any, RO: any, invId: string;
 
   beforeAll(async () => {
     const u = `rosec${Date.now()}${Math.floor(Math.random() * 1000)}`;
     const reg = await post("/signup", { user: { username: u, password } });
     const { token } = await reg.json();
     A = { authorization: `Bearer ${token}` };
-    meId = (await (await fetch(`${API}/me`, { headers: A })).json()).id;
     const ro = await (await fetch(`${API}/ro`, { headers: A })).json();
     RO = { authorization: `Bearer ${ro}` };
     invId = (await (await post("/invoice", { invoice: { amount: 500, type: "lightning" } }, RO)).json()).id;

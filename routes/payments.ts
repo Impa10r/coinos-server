@@ -192,7 +192,7 @@ export default {
         payreq?.slice(-8),
         shortError(e.message),
       );
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -210,7 +210,7 @@ export default {
       if (!aid || aid === "undefined") aid = id;
 
       const index = await db.lPos(`${id}:accounts`, aid);
-      if (index === null) fail("unauthorized");
+      if (index === null) fail("unauthorized", 401);
 
       limit = Number.parseInt(limit);
       offset = Number.parseInt(offset) || 0;
@@ -308,7 +308,7 @@ export default {
       return c.json({ payments, count, incoming, outgoing });
     } catch (e: any) {
       warn("problem listing payments", user?.username, e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -321,7 +321,7 @@ export default {
       return c.json(p);
     } catch (e) {
       err("failed to get payment", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -374,7 +374,7 @@ export default {
       });
     } catch (e) {
       err("problem parsing", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -440,7 +440,7 @@ export default {
       });
     } catch (e: any) {
       err("problem fetching fund", c.req.param("id"), e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -467,7 +467,7 @@ export default {
       }
 
       const managers = [...(await db.sMembers(`fund:${id}:managers`))];
-      if (managers.length && !managers.includes(uid)) fail("Unauthorized");
+      if (managers.length && !managers.includes(uid)) fail("Unauthorized", 401);
 
       // The authorization's fiat/currency is the ONLY ceiling on how much a later
       // /take can pull from the authorizer (cap = sats(fiat / rates[currency])).
@@ -495,7 +495,7 @@ export default {
       return c.json({ authId });
     } catch (e: any) {
       warn("problem authorizing fund", user?.username, e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -514,7 +514,7 @@ export default {
       const authId = c.req.param("authId");
 
       const managers = [...(await db.sMembers(`fund:${id}:managers`))];
-      if (managers.length && !managers.includes(user.id)) fail("Unauthorized");
+      if (managers.length && !managers.includes(user.id)) fail("Unauthorized", 401);
 
       const authorization = await g(`authorization:${authId}`);
       if (!authorization || authorization.fundId !== id) return bail(c, "Authorization not found");
@@ -525,7 +525,7 @@ export default {
       return c.json({});
     } catch (e: any) {
       warn("problem deleting fund authorization", user?.username, e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -605,7 +605,7 @@ export default {
           // every later /take skips the funding block.
           try {
             const sender = await getUser(authorization.uid);
-            if (!sender) fail("authorizer not found");
+            if (!sender) fail("authorizer not found", 404);
 
             const { hash } = await generate({
               invoice: { amount, type: "lightning" },
@@ -635,7 +635,7 @@ export default {
       }
 
       const managers = [...(await db.sMembers(`fund:${id}:managers`))];
-      if (managers.length && !managers.includes(user.id)) fail("Unauthorized");
+      if (managers.length && !managers.includes(user.id)) fail("Unauthorized", 401);
 
       const result: any = await tbFundDebit(id, amount, "Insufficient funds");
       if (result.err) fail(result.err);
@@ -655,7 +655,7 @@ export default {
       return c.json(payment);
     } catch (e) {
       warn("problem withdrawing from fund", user.username, e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -689,7 +689,7 @@ export default {
       const managers: any[] = [...(await db.sMembers(k))];
       const founding = !managers.length;
 
-      if (!founding && !managers.includes(user.id)) fail("Unauthorized");
+      if (!founding && !managers.includes(user.id)) fail("Unauthorized", 401);
 
       // No managers yet usually means this call is establishing a brand-new
       // fund (the caller becomes its founding manager) — same unguessable-id
@@ -708,7 +708,7 @@ export default {
       const u = await getUser(username, fields);
       // Name the target. The warn below reports the CALLER, so a bare "User
       // not found" left no way to tell a typo from a lookup problem.
-      if (!u) fail(`User not found: ${username}`);
+      if (!u) fail(`User not found: ${username}`, 404);
       const { id: uid } = u;
 
       if (founding) await db.sAdd(k, user.id);
@@ -723,7 +723,7 @@ export default {
       return c.json(resolved);
     } catch (e: any) {
       warn("problem adding fund manager", user?.username, e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -738,7 +738,7 @@ export default {
       let managers: any[] = [...(await db.sMembers(k))];
 
       if (managers.length) {
-        if (!managers.includes(user.id)) fail("Unauthorized");
+        if (!managers.includes(user.id)) fail("Unauthorized", 401);
       }
 
       await db.sRem(k, uid);
@@ -749,7 +749,7 @@ export default {
       return c.json(managers);
     } catch (e: any) {
       warn("problem deleting fund manager", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -777,7 +777,7 @@ export default {
       // via `ps` while it runs) and sends it over plain HTTP; it must never
       // double as the admin password.
       if (!config.txWebhookSecret || !safeEqual(secret || "", config.txWebhookSecret))
-        fail("unauthorized");
+        fail("unauthorized", 401);
 
       const node = rpc({ ...config[type], wallet });
       let tx;
@@ -958,7 +958,7 @@ export default {
       return c.json({});
     } catch (e: any) {
       warn(`problem processing ${txid}`, e?.message ?? String(e));
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -970,7 +970,7 @@ export default {
 
     try {
       if (config.txWebhookSecret && !safeEqual(hookSecret || "", config.txWebhookSecret))
-        fail("unauthorized");
+        fail("unauthorized", 401);
       if (!txid) fail("missing txid");
 
       const tx = await getTx(txid);
@@ -979,7 +979,7 @@ export default {
       return c.json({});
     } catch (e) {
       warn("problem processing tx webhook", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1086,7 +1086,7 @@ export default {
       return c.json(p);
     } catch (e) {
       warn("lnaddress failed", e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1096,8 +1096,8 @@ export default {
     const user = c.get("user");
     try {
       const p = await gf(`payment:${id}`);
-      if (!p) fail("Payment not found");
-      if (p.uid !== user.id) fail("unauthorized");
+      if (!p) fail("Payment not found", 404);
+      if (p.uid !== user.id) fail("unauthorized", 401);
       if (p.confirmed) fail("transaction already confirmed");
       if (p.type !== PaymentType.bitcoin) fail("only bitcoin transactions can be bumped");
 
@@ -1141,7 +1141,7 @@ export default {
       return c.json({ txid: result.txid, fee: newFee });
     } catch (e) {
       err("failed to bump payment", id, e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1166,11 +1166,11 @@ export default {
       // sendInternal -> generate() throws the far less clear "user not
       // provided" for this same case, uncaught here until now — fail with a
       // reason a caller can actually act on.
-      if (!recipient) fail("recipient not found");
+      if (!recipient) fail("recipient not found", 404);
       return c.json(await sendInternal({ amount, sender, recipient }));
     } catch (e: any) {
       warn(sender?.username, "internal send failed", username, e.message);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1186,7 +1186,7 @@ export default {
       const user = c.get("user");
       return c.json(await getUserOffer(user));
     } catch (e) {
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1237,7 +1237,7 @@ export default {
 
       return c.json(p);
     } catch (e) {
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1305,7 +1305,7 @@ export default {
         await db.del(lockKey);
       }
     } catch (e) {
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1317,7 +1317,7 @@ export default {
       return c.json(p);
     } catch (e) {
       warn("usdt send failed", e.message, user.username);
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1328,7 +1328,7 @@ export default {
       const amount = balances[assetId] || 0;
       return c.json({ amount });
     } catch (e) {
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1366,7 +1366,7 @@ export default {
 
       return c.json({ amount: spendable });
     } catch (e) {
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -1376,7 +1376,7 @@ export default {
       const amount = sats(balances.bitcoin || balances[config.liquid.btc] || 0);
       return c.json({ amount });
     } catch (e) {
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 };

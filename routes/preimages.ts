@@ -85,7 +85,7 @@ export default {
         })),
       });
     } catch (e) {
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -101,7 +101,7 @@ export default {
         }),
       });
     } catch (e) {
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 
@@ -111,7 +111,7 @@ export default {
       await db.del(key(user.id));
       return c.json({ queued: 0 });
     } catch (e) {
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 };

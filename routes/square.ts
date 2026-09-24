@@ -87,7 +87,7 @@ export default {
 
       return c.json({});
     } catch (e) {
-      return bail(c, e.message);
+      return bail(c, e);
     }
   },
 };

@@ -31,8 +31,10 @@ describe("handlers return their refusal instead of throwing", () => {
       ctx({ id: OWNER, username: "owner" }, { pubkey: "somepubkey" }),
     );
 
-    // bail()'s shape — a refusal carrying its reason, not a bare {ok:false}
-    expect(res.status).toBe(500);
+    // bail()'s shape — a refusal carrying its reason, not a bare {ok:false}.
+    // 401, not 500: fail() now tags a refusal with its status and bail() keeps
+    // it, so a 500 means an actual server fault again.
+    expect(res.status).toBe(401);
     expect(res.payload).toBe("unauthorized");
   });
 

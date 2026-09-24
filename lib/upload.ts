@@ -53,6 +53,6 @@ export default async (c) => {
     return c.json({ hash });
   } catch (e) {
     err("problem uploading", e.message);
-    return bail(c, e.message);
+    return bail(c, e);
   }
 };
