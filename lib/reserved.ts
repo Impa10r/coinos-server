@@ -17,7 +17,7 @@ import config from "$config";
 //                      lightning instead of being settled internally
 //   lib/nwc.ts         same special case, twice
 //   routes/users.ts    the admin password-reset endpoint compares against
-//                      config.admin; the mqtt ACL against config.mqtt2.username
+//                      config.admin.
 //
 // Until this existed the only thing standing between an attacker and that
 // authority was the account already existing — nothing stopped someone
@@ -59,9 +59,9 @@ export const isReserved = (username?: string): boolean => {
   const name = String(username).replace(/\s/g, "").toLowerCase();
 
   // Configured privileged identities, resolved at call time so a config change
-  // doesn't need a rebuild to take effect. Upstream's list is static; these
-  // two names are deployment-specific and just as much a credential.
-  const configured = [(config as any).admin, (config as any).mqtt2?.username]
+  // doesn't need a rebuild to take effect. Upstream's list is static; this
+  // name is deployment-specific and just as much a credential.
+  const configured = [(config as any).admin]
     .filter(Boolean)
     .map((u: string) => String(u).replace(/\s/g, "").toLowerCase());
 

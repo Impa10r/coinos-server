@@ -7,7 +7,6 @@ import { generate, getUserOffer } from "$lib/invoices";
 import { replay } from "$lib/lightning";
 import ln from "$lib/ln";
 import { err, l, shortError, warn } from "$lib/logging";
-import mqtt from "$lib/mqtt";
 import {
   build,
   completePayment,
@@ -1041,27 +1040,6 @@ export default {
     }
   },
 
-  async print(c) {
-    const body = await c.req.json();
-    const { id } = body;
-    const user = c.get("user");
-    try {
-      const p = await gf(`payment:${id}`);
-      if (!p) fail("Payment not found");
-      if (p.uid !== user.id) fail("unauthorized");
-      emit(user.id, "payment", p);
-
-      const { username } = user;
-
-      mqtt.publish(username, `pay:${p.amount}:${p.tip}:${p.rate}:${p.created}:${p.id}`, {
-        qos: 1,
-      });
-
-      return c.json({ ok: true });
-    } catch (e) {
-      return bail(c, e.message);
-    }
-  },
 
   async lnaddress(c) {
     const body = await c.req.json();

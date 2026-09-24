@@ -1157,48 +1157,6 @@ export default {
     }
   },
 
-  async printerlogin(c) {
-    const body = await c.req.json();
-    const { username, topic } = body;
-    if (username === topic) return c.json({ ok: true });
-    else return bail(c, "unauthorized");
-  },
-
-  // MQTT broker authorization hook, unauthenticated by design — the broker
-  // calls it, not a user. It grants access to a topic purely on the username
-  // string in the request, with no proof that the caller is that user, so it
-  // is only a control if the broker has already authenticated them by some
-  // other means. That backend is not in this repository (the broker is
-  // mqtt.coinos.io), so this cannot be settled from source: if the broker
-  // permits anonymous connections, anyone may claim any username and read
-  // that user's payment feed, which carries amount, tip, rate, memo and items
-  // (see notify() in lib/notifications.ts). Worth confirming against the
-  // broker's actual auth configuration.
-  //
-  // Note also that printerlogin() below is the matching authentication hook
-  // and is not routed in index.ts at all.
-  async acl(c) {
-    const body = await c.req.json();
-    const { username, topic } = body;
-    if (username === topic) return c.json({ ok: true });
-    else return bail(c, "unauthorized");
-  },
-
-  async superuser(c) {
-    const body = await c.req.json();
-    const { username } = body;
-    // config.mqtt2 is not set on this deployment, so `config.mqtt2.username`
-    // threw a TypeError on every call: an unauthenticated route escaping to
-    // app.onError, logged as an unhandled server fault and answered with a
-    // bare 500. Whether the broker reads that as "not a superuser" or as a
-    // backend error to be retried or ignored is the broker's business, and we
-    // shouldn't be finding out by accident. Refuse explicitly when no
-    // superuser is configured.
-    const su = (config as any).mqtt2?.username;
-    if (su && username === su) return c.json({ ok: true });
-    return bail(c, "unauthorized");
-  },
-
   async request(c) {
     const body = await c.req.json();
     const { email } = body;

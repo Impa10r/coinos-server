@@ -355,7 +355,6 @@ if (process.env.INTEGRATION) {
     decryptPayload: mock(async (payload: string) => payload),
     encryptPayload: mock(async (payload: string) => payload),
   }));
-  mock.module("$lib/mqtt", () => ({ default: { publish: () => {} } }));
   mock.module("$lib/ark", () => ({
     getArkAddress: async () => "ark-addr",
     sendArk: async () => "ark-txid",

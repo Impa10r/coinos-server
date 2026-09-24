@@ -3,7 +3,6 @@ import { db, g } from "$lib/db";
 import ln from "$lib/ln";
 import { err, l, warn } from "$lib/logging";
 import { mail, templates } from "$lib/mail";
-import mqtt from "$lib/mqtt";
 import { encryptPayload, publish, serverSecret2 } from "$lib/nostr";
 import { emit } from "$lib/sockets";
 import { f, fiat, fmt, getUser, link, nada, t } from "$lib/utils";
@@ -15,21 +14,6 @@ if (config.vapid) {
   webpush.setVapidDetails(`mailto:${config.support}`, config.vapid.pk, config.vapid.sk);
 }
 
-
-// LNURL-pay invoices carry the raw metadata array as their memo when the
-// payer left no comment, e.g. [["text/plain","Paying x@coinos.io"],...].
-// Receipts should show just the human-readable text.
-const printerMemo = (memo) => {
-  if (typeof memo !== "string" || !memo.startsWith("[")) return memo;
-  try {
-    const meta = JSON.parse(memo);
-    if (Array.isArray(meta)) {
-      const plain = meta.find((m) => Array.isArray(m) && m[0] === "text/plain");
-      if (plain) return plain[1];
-    }
-  } catch {}
-  return memo;
-};
 
 export const notify = async (p, user, withdrawal) => {
   emit(user.id, "payment", p);
@@ -81,14 +65,6 @@ export const notify = async (p, user, withdrawal) => {
     });
   }
 
-  if (config.mqtt) {
-    if (!mqtt.connected) await mqtt.reconnect();
-    mqtt.publish(
-      username,
-      `pay:${p.amount}:${p.tip}:${p.rate}:${p.created}:${p.id}:${printerMemo(p.memo)}:${p.items}`,
-    { qos: 1 },
-    );
-  }
 };
 
 export const nwcNotify = async (p) => {
