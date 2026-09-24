@@ -17,6 +17,11 @@ import { Relay } from "nostr-tools/relay";
 
 export const EX = 60 * 60 * 24;
 
+// Hard ceiling on how long one external relay may hold up a query. Relays go
+// away without closing the socket, and several of the configured ones are
+// already dead (the "invite listener failed wss://brb.io" noise in the logs).
+export const RELAY_TIMEOUT = 5000;
+
 export const serverSecret = bytesToHex(nip19.decode(config.nostrKey).data as unknown as Uint8Array);
 
 export const serverSecret2 = bytesToHex(
@@ -242,20 +247,50 @@ export const q = async (f) => {
         (url) =>
           new Promise<Event[]>((resolve) => {
             const found: Event[] = [];
+            // Always resolve, and always within RELAY_TIMEOUT. Previously the
+            // only exits were oneose() and a connect rejection, so a relay that
+            // accepted the socket and then said nothing left this promise
+            // pending for ever: Promise.all never settled, the HTTP request
+            // that triggered it hung, and the websocket leaked. Every
+            // unauthenticated nostr route reaches this — /profile/:profile,
+            // /thread/:id, /event/:id, /:pubkey/follows, /parseEvent — so one
+            // sick relay was enough to tie them all up.
+            let done = false;
+            let relay: any;
+            const finish = (result: Event[]) => {
+              if (done) return;
+              done = true;
+              try {
+                relay?.close();
+              } catch {}
+              resolve(result);
+            };
+            const timer = setTimeout(() => finish(found), RELAY_TIMEOUT);
             Relay.connect(url)
               .then((r) => {
+                relay = r;
+                if (done) {
+                  // timed out while connecting — don't subscribe at all
+                  try {
+                    r.close();
+                  } catch {}
+                  return;
+                }
                 r.subscribe([f], {
                   onevent(e) {
                     found.push(e);
                     publish(e).catch(() => {});
                   },
                   oneose() {
-                    r.close();
-                    resolve(found);
+                    clearTimeout(timer);
+                    finish(found);
                   },
                 });
               })
-              .catch(() => resolve([]));
+              .catch(() => {
+                clearTimeout(timer);
+                finish([]);
+              });
           }),
       ),
     )

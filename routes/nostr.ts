@@ -5,6 +5,26 @@ import { warn } from "$lib/logging";
 import { getMlsUsers } from "$lib/mls";
 import { EX, get, getCount, getNostrUser, getProfile, publish, q, serverPubkey } from "$lib/nostr";
 import { parseContent } from "$lib/notes";
+
+// How many DISTINCT pubkeys one request may resolve profiles for, and they are
+// resolved CONCURRENTLY. An uncached profile misses redis, misses the local
+// relay, then opens a websocket to every configured external relay (7 here) and
+// waits up to RELAY_TIMEOUT. Done sequentially that is cap x 5s of held request
+// time; done concurrently the whole request is bounded by a single timeout
+// instead. The cap is what bounds outbound fan-out (cap x 7 sockets); the
+// concurrency is what bounds latency. Names beyond the cap are omitted and the
+// client renders the npub, which beats a request that hangs for a minute.
+const MAX_PROFILE_LOOKUPS = 8;
+
+// Resolve a deduped, capped set of pubkeys at once. Returns a Map, missing
+// entries meaning "not resolved" rather than "no such profile".
+const resolveProfiles = async (pubkeys: string[]) => {
+  const wanted = [...new Set(pubkeys.filter(Boolean))].slice(0, MAX_PROFILE_LOOKUPS);
+  const results = await Promise.all(
+    wanted.map(async (pk) => [pk, (await getProfile(pk).catch(() => null)) ?? null] as const),
+  );
+  return new Map(results);
+};
 import { scan } from "$lib/strfry";
 import { bail, fail, fields, getUser } from "$lib/utils";
 import got from "got";
@@ -132,16 +152,26 @@ export default {
     const parts = parseContent(event);
     const names = {};
 
-    for (const { type, value } of parts) {
-      if (type.includes("nprofile") || type.includes("npub")) {
-        // The pubkey comes from the caller's own event content, and one with
-        // no cached profile returns null — destructuring it threw, so a single
-        // unknown npub in a parsed note 500'd the whole request. Same shape at
-        // the other two getProfile sites in this file.
-        const { name } = (await getProfile(value.pubkey)) ?? ({} as any);
-        names[value.pubkey] = name;
-      }
-    }
+    // Deduped and capped. This endpoint is unauthenticated and the content is
+    // the caller's, so the loop used to run once per npub they chose to
+    // include, with no ceiling. An uncached pubkey is not a cheap lookup: it
+    // misses redis, misses the local relay, and then opens a websocket to
+    // EVERY configured external relay (7 on this deployment). Measured at
+    // ~2.1s and 7 outbound connections per uncached npub, so a note carrying a
+    // few hundred random npubs was minutes of held request time and thousands
+    // of outbound sockets, from one unauthenticated POST.
+    //
+    // Deduping matters on its own: getProfile caches, so repeats were already
+    // cheap, and the expensive case is exactly the distinct-random one.
+    const profiles = await resolveProfiles(
+      parts
+        .filter(({ type }) => type.includes("nprofile") || type.includes("npub"))
+        .map(({ value }) => value.pubkey),
+    );
+
+    // An unresolved pubkey yields null, not a throw — a single unknown npub in
+    // a parsed note used to 500 the whole request by destructuring it.
+    for (const [pubkey, profile] of profiles) names[pubkey] = profile?.name;
 
     return c.json({ parts, names });
   },
@@ -160,16 +190,40 @@ export default {
 
       const thread = [root, ...(await q({ kinds: [1], "#e": [root.id] }))];
 
+      // Same unbounded fan-out as parse(), squared: one getProfile per event
+      // for its author, plus one per npub inside each event's content, over a
+      // thread whose length the caller does not control but an attacker can
+      // grow by replying to their own note. Each uncached pubkey opens a
+      // websocket to every configured external relay. One budget for the whole
+      // request, deduped, so a long thread degrades to fewer resolved names
+      // rather than to minutes of held connections.
+      // Parse first so every pubkey the thread needs is known, then resolve
+      // them all in one capped concurrent batch. The previous shape was a
+      // getProfile per event for its author PLUS one per npub inside each
+      // event's body, awaited one at a time — a fan-out the caller grows just
+      // by replying to their own note, each uncached hit opening a websocket to
+      // every configured relay.
       for (const t of thread) {
         const e = t as any;
-        e.author = await getProfile(e.pubkey);
         e.parts = parseContent(e);
         e.names = {};
+      }
+
+      const profiles = await resolveProfiles([
+        ...thread.map((t: any) => t.pubkey),
+        ...thread.flatMap((t: any) =>
+          t.parts
+            .filter(({ type }) => type.includes("nprofile") || type.includes("npub"))
+            .map(({ value }) => value.pubkey),
+        ),
+      ]);
+
+      for (const t of thread) {
+        const e = t as any;
+        e.author = profiles.get(e.pubkey) ?? null;
         for (const { type, value } of e.parts) {
-          if (type.includes("nprofile") || type.includes("npub")) {
-            const { name } = (await getProfile(value.pubkey)) ?? ({} as any);
-            e.names[value.pubkey] = name;
-          }
+          if (type.includes("nprofile") || type.includes("npub"))
+            e.names[value.pubkey] = profiles.get(value.pubkey)?.name;
         }
       }
 
