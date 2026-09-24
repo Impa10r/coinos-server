@@ -335,7 +335,6 @@ if (process.env.INTEGRATION) {
     parseDescriptor: mock(() => ({})),
     findLastUsedIndex: mock(async () => -1),
   }));
-  mock.module("$lib/square", () => ({ squarePayment: () => {} }));
   mock.module("$lib/nostr", () => ({
     handleZap: async () => {},
     publish: async () => {},

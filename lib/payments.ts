@@ -189,7 +189,6 @@ const outLn = {
 import { err, l, shortError, warn } from "$lib/logging";
 import { notify, nwcNotify } from "$lib/notifications";
 import { emit } from "$lib/sockets";
-import { squarePayment } from "$lib/square";
 import {
   getBalance,
   getCredit,
@@ -852,8 +851,6 @@ export const completePayment = async (inv, p, user) => {
 
   nwcNotify(p);
   notify(p, user, withdrawal);
-
-  squarePayment(p, user);
 
   // completePayment runs at two lifecycle points for on-chain (bitcoin/liquid)
   // deposits — once when the tx is first seen (pending) and again from /confirm

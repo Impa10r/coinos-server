@@ -1056,8 +1056,6 @@ export default {
         `${id}:pins`,
         `${id}:subscriptions`,
         `${id}:trust`,
-        `${id}:square`,
-        `${id}:codeVerifier`,
         `account:${id}`,
         `balance:${id}`,
         `pending:${id}`,

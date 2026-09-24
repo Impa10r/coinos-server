@@ -1,5 +1,3 @@
-import { SquareEnvironment } from "square";
-
 export default {
   // SECURITY: db/archive have no auth by default — set DB_PASSWORD (and
   // matching --requirepass in compose.yml) before exposing these anywhere
@@ -125,12 +123,6 @@ export default {
   nostrKey2: "nsec1replacewithafreshlygeneratedkeydonotusethissamplevalue1",
   nostrKeyFips: "nsec1replacewithafreshlygeneratedkeydonotusethissamplevalue2",
   mintUrl: "http://mint:3338",
-  square: {
-    environment: SquareEnvironment.Sandbox,
-    appId: "sandbox-sq0adb-9QbyDZeHTPc_RhFSEr_SaQ",
-    url: "https://connect.squareupsandbox.com/",
-    scopes: ["MERCHANT_PROFILE_READ", "ORDERS_READ", "PAYMENTS_READ"],
-  },
   tigerbeetle: { cluster_id: 0n, replica_addresses: ["tb:3000"] },
   vapid: {
     pk: "BFCcO7u4fpgDjWK-...",  // PUBLIC_VAPID_PUBKEY value

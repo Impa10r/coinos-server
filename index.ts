@@ -36,7 +36,6 @@ import payments from "$routes/payments";
 import preimages from "$routes/preimages";
 import rates from "$routes/rates";
 import shopify from "$routes/shopify";
-import square from "$routes/square";
 import users from "$routes/users";
 
 try {
@@ -153,9 +152,6 @@ app.get("/offer", auth, payments.offer);
 app.post("/fetchinvoice", auth, payments.fetchinvoice);
 app.post("/bitcoin/sync", auth, payments.bitcoinSync);
 
-app.get("/square/connect", auth, square.connect);
-app.get("/square/auth", auth, square.auth);
-app.post("/square/payment", square.payment);
 
 // Unauthenticated by design — the /ln/<lnurl> page fetches through it before
 // the user has done anything — which also makes it a free URL fetcher on this
