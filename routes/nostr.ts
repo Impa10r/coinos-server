@@ -346,16 +346,25 @@ export default {
     if (name) {
       // v3 registrar first: a claimed name's NIP-05 belongs to its wallet key.
       // Legacy accounts answer as before when the registrar doesn't know it.
-      try {
-        const r = await fetch(
-          `${process.env.NAMES_URL || "https://names.coinos.io"}/.well-known/nostr.json?name=${encodeURIComponent(name)}`,
-          { signal: AbortSignal.timeout(3000) },
-        );
-        if (r.ok) {
-          const j = await r.json();
-          if (j?.names?.[name]) return c.json({ names: { [name]: j.names[name] } });
-        }
-      } catch {}
+      //
+      // Opt-in on NAMES_URL, matching routes/lnurl.ts. This used to default to
+      // names.coinos.io, so an instance with no v3 migration — no NAMES_URL
+      // set anywhere — still called out to a third-party registrar on every
+      // NIP-05 lookup, and would answer for its OWN user with whatever pubkey
+      // that registrar returned for the name. lnurl.ts deliberately carries no
+      // default for exactly this reason; this was the one spot that did.
+      if (process.env.NAMES_URL) {
+        try {
+          const r = await fetch(
+            `${process.env.NAMES_URL}/.well-known/nostr.json?name=${encodeURIComponent(name)}`,
+            { signal: AbortSignal.timeout(3000) },
+          );
+          if (r.ok) {
+            const j = await r.json();
+            if (j?.names?.[name]) return c.json({ names: { [name]: j.names[name] } });
+          }
+        } catch {}
+      }
       const u = await getUser(name, fields);
       if (!u) return c.json({ names: {} }); // unknown name: empty per NIP-05, not a 500
       names = { [name]: u.pubkey };
