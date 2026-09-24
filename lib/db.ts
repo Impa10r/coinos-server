@@ -63,6 +63,24 @@ export const s = (k, v, ttl?: number) => {
   return db.set(k, JSON.stringify(v), ttl ? { EX: ttl } : undefined);
 };
 
+// Prefer this over db.scanIterator directly.
+//
+// scanIterator yields a BATCH (an array of keys) per iteration, not a single
+// key — and it yields one for every chunk of the keyspace it walks, so most
+// batches are EMPTY. On a keyspace with no matches at all it still produced
+// ~2000 empty arrays in testing. Code written as
+//
+//   for await (const k of db.scanIterator({ MATCH: p })) await db.del(k);
+//
+// therefore does two wrong things at once: `k` is an array, and on an empty
+// one `db.del([])` is `DEL` with no arguments, which redis rejects outright
+// ("ERR wrong number of arguments"). That shape shipped in reset() and threw
+// on its first iteration in the ordinary case. It survived review because
+// node-redis's `del` happens to accept an array, so the non-empty case works
+// and the bug only appears when nothing matches.
+//
+// This wrapper flattens to individual keys. If you need the batch form for
+// bulk deletes, guard it: `if (keys.length) await db.del(keys)`.
 export async function* scan(pattern: string) {
   for await (const keys of db.scanIterator({ MATCH: pattern })) {
     for (const k of keys) yield k;

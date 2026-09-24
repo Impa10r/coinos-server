@@ -1167,8 +1167,16 @@ export default {
       const un = username.toLowerCase().replace(/\s/g, "");
       await db.del(`${un}:failures`);
 
-      for await (const k of db.scanIterator({ MATCH: "ip:*:login:fail" })) {
-        await db.del(k);
+      // scanIterator yields BATCHES of keys, not keys — and it yields a batch
+      // for every chunk of the keyspace it walks, most of which match nothing.
+      // `db.del(<empty array>)` is `DEL` with no arguments, which redis rejects
+      // ("ERR wrong number of arguments"), so this loop threw on its first
+      // iteration whenever there were no login-failure keys — the normal case.
+      // reset() had already written the new password by then, so the account
+      // was reset but the caller got a 500 and "password reset failed" in the
+      // log: the worst possible signal during incident response.
+      for await (const keys of db.scanIterator({ MATCH: "ip:*:login:fail" })) {
+        if (keys.length) await db.del(keys);
       }
 
       return c.json(pick(user, whitelist));
