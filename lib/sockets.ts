@@ -1,4 +1,5 @@
 import config from "$config";
+import { db } from "$lib/db";
 import store from "$lib/store";
 import jwt from "jsonwebtoken";
 import { v4 } from "uuid";
@@ -77,7 +78,8 @@ export const broadcast = (type, data) => {
 
 const track = async (ws, token) => {
   const { id } = ws;
-  let { id: uid } = verifyToken(token) || {};
+  const claims = verifyToken(token) || ({} as any);
+  let { id: uid } = claims;
 
   if (!uid) fail("Invalid JWT token");
 
@@ -86,6 +88,15 @@ const track = async (ws, token) => {
   // device can log in and receive payment events, but nothing else.
   const readonly = uid.endsWith("-ro");
   if (readonly) uid = uid.slice(0, -3);
+
+  // Mirror lib/auth.ts's password-change watermark. A socket authenticates on
+  // its own, so without this a revoked session kept streaming payment events
+  // even though every HTTP call with the same token had started failing.
+  // Read-only tokens are exempt there and exempt here, for the same reason.
+  if (!readonly) {
+    const since = await db.get(`tokens:since:${uid}`);
+    if (since && (claims.iat ?? 0) < Number(since)) fail("Session expired");
+  }
 
   const user = await getUser(uid);
   if (!user) fail(`User not found ${uid}`);

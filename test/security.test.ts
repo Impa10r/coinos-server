@@ -329,3 +329,43 @@ describe("ro-token — the read-only POS token cannot write merchant config", ()
     expect((await r.json()).webhook).toBe("https://merchant.example/h");
   });
 });
+
+describe("session revocation — a password change ends older sessions", () => {
+  // Tokens carry no exp, there is no logout endpoint and no server-side session
+  // store, so the standard remediation for a leaked token — change the password
+  // — used to achieve nothing: the old token stayed valid indefinitely. reset()
+  // was worse, since it also clears the pin, removing the gate on sending from
+  // an account it was called to secure.
+  const p2 = "a-completely-new-password-9271";
+  let STOLEN: any, RO: any, NEW: any;
+
+  beforeAll(async () => {
+    const u = `revoke${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    const { token } = await (await post("/signup", { user: { username: u, password } })).json();
+    STOLEN = { authorization: `Bearer ${token}` };
+    RO = { authorization: `Bearer ${await (await fetch(`${API}/ro`, { headers: STOLEN })).json()}` };
+
+    // The watermark has 1-second granularity and the comparison is strictly
+    // less-than, so a token minted in the same second as the change survives by
+    // design — that is what keeps the acting session alive. Cross the boundary.
+    await new Promise((r) => setTimeout(r, 1100));
+
+    const { token: owner } = await (await post("/login", { username: u, password })).json();
+    const res = await post("/user", { username: u, password: p2, confirm: p2 }, { authorization: `Bearer ${owner}` });
+    NEW = { authorization: `Bearer ${(await res.json()).token}` };
+  });
+
+  test("the pre-change token is revoked", async () => {
+    expect((await fetch(`${API}/me`, { headers: STOLEN })).status).toBe(401);
+    expect((await fetch(`${API}/payments`, { headers: STOLEN })).status).toBe(401);
+  });
+
+  test("the session that made the change keeps working on its replacement", async () => {
+    expect(NEW.authorization).not.toContain("undefined");
+    expect((await fetch(`${API}/me`, { headers: NEW })).status).toBe(200);
+  });
+
+  test("a POS token is spared — firmware cannot refresh itself", async () => {
+    expect((await fetch(`${API}/payments`, { headers: RO })).status).toBe(200);
+  });
+});

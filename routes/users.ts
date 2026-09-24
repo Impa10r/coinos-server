@@ -535,12 +535,29 @@ export default {
       user.fresh = false;
       user.tip = Math.max(0, Math.min(1000, Number.parseInt(user.tip)));
 
+      let reissued: string | undefined;
       if (password && password === confirm) {
         user.password = await Bun.password.hash(password, {
           algorithm: "bcrypt",
           cost: 12,
         });
         if (body.authPubkey) user.authPubkey = body.authPubkey;
+
+        // Every session older than this instant stops working (see the iat
+        // check in lib/auth.ts). Without it a password change did nothing to
+        // an attacker already holding a token.
+        await db.set(`tokens:since:${user.id}`, Math.floor(Date.now() / 1000));
+
+        // ...including the one making this request, so hand back a fresh token
+        // and cookie. Otherwise changing your own password logs you out.
+        reissued = jwt.sign({ id: user.id }, config.jwt);
+        setCookie(c, "token", reissued, {
+          expires: new Date(Date.now() + 1 * 365 * 24 * 60 * 60 * 1000),
+          path: "/",
+          httpOnly: true,
+          secure: true,
+          sameSite: "Strict",
+        });
       }
 
       user.haspin = !!user.pin;
@@ -558,7 +575,7 @@ export default {
       }
 
       emit(user.id, "user", pick(user, whitelist));
-      return c.json({ user: pick(user, whitelist) });
+      return c.json({ user: pick(user, whitelist), ...(reissued && { token: reissued }) });
     } catch (e) {
       warn("failed to update", user.username, e.message);
       return bail(c, e);
@@ -1139,6 +1156,12 @@ export default {
         algorithm: "bcrypt",
         cost: 12,
       });
+
+      // End every existing session for this account. reset() is the incident
+      // response for a compromised account, and it also clears the pin above —
+      // so leaving old tokens alive handed an attacker a still-valid session
+      // with the send gate now removed.
+      await db.set(`tokens:since:${id}`, Math.floor(Date.now() / 1000));
 
       await s(`user:${id}`, user);
       await db.del(`reset:${code}`);

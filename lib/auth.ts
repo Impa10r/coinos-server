@@ -264,7 +264,32 @@ const authenticate = async (c) => {
       GET: ["/invoices", "/payments", "/payments/:hash"],
       POST: ["/invoice"],
     };
-    if (id.endsWith("-ro") && wl[method]?.includes(c.req.routePath)) id = id.slice(0, -3);
+    // Captured BEFORE the strip below: on an allowlisted route the suffix is
+    // removed, after which a read-only token is indistinguishable from a full
+    // one — and the watermark check further down would then revoke the POS
+    // tokens it is meant to spare.
+    const readonly = id.endsWith("-ro");
+    if (readonly && wl[method]?.includes(c.req.routePath)) id = id.slice(0, -3);
+
+    // A password change ends every session that predates it. Tokens carry no
+    // exp, there is no logout endpoint and no server-side session store, so
+    // without this the standard remediation for a leaked token — change your
+    // password — achieved nothing: the attacker's token stayed valid for ever.
+    // `reset()` made it worse, since it also clears the pin, removing the gate
+    // on sending from an account it was called to secure.
+    //
+    // `iat` is already on every token (jsonwebtoken adds it), so this needs no
+    // change to what we issue. Strictly-less-than, so a token minted in the
+    // same second as the change survives — the acting session keeps working.
+    //
+    // Read-only POS tokens are deliberately exempt: they are flashed into
+    // printer firmware and cannot refresh themselves, so a routine password
+    // rotation would silently stop a shop's receipts until someone reflashed
+    // every device. Revoking those is what eviction is for.
+    if (!readonly) {
+      const since = await db.get(`tokens:since:${id}`);
+      if (since && ((payload as any).iat ?? 0) < Number(since)) return null;
+    }
 
     const user = await getUser(id);
     if (await isEvicted(c, user)) return null;
