@@ -10,9 +10,20 @@
 # Format: one full 40-char commit SHA per line, `#` starts a comment,
 # blank lines ignored. upstream-check.yml skips any SHA listed here.
 #
-# Add an entry only after actually verifying the content is present — this
-# file silences the daily check for that commit forever, so a wrong entry
-# here would hide a real gap.
+# Two kinds of entry live here, and the distinction matters:
+#
+#   1. INCORPORATED — the content is present, verified by reading the diffs.
+#      Add one only after actually checking, because this file silences the
+#      daily check for that commit forever and a wrong entry would hide a
+#      real gap.
+#
+#   2. DECLINED — the content is deliberately NOT being taken, because this
+#      fork has made a different product or architectural choice. These are
+#      not gaps; they are decisions. They were held out of this file for a
+#      while precisely so they would keep alerting, but an alert that fires
+#      daily on a settled decision trains you to ignore the alert, which
+#      costs more than it saves. Each one below records what was decided and
+#      what would have to change to revisit it.
 
 # All of the following are pre-existing sendLightning/finalize
 # instrumentation and leak-guard tuning against the OLD synchronous xpay
@@ -80,3 +91,35 @@ fb09303ff274a241c28cccc0cd29550f6e59d0b2 # confirm: guard the first-seen deposit
 #                      If this fork ever joins a v3 registrar, the guard has
 #                      to be written before NAMES_URL is set.
 d8a361bdcfaa8cc5b39d9675e74b0e1d2e42be2c # security: drop the admin endpoint surface and land pending hardening
+
+# ---------------------------------------------------------------- DECLINED
+# Deliberately not taken. Silenced on the operator's instruction 2026-09-24,
+# after each had been alerting daily since the sync pass that deferred it.
+# Revisit only if the note says the reason has lapsed.
+
+# Upstream is RETIRING the fund mechanism outright: deposit, /take and
+# /authorize all refuse unconditionally. This fork uses funds actively — gift
+# links and the lnurlw withdraw flow — and has taken its own fund code
+# further than upstream's in the opposite direction: 28701118 fixed take()
+# consuming an authorization before authorizing the caller, and 352959c2 made
+# a managed fund visible only to its managers. Taking this would delete a
+# live feature. Revisit only if funds are being retired here too.
+d128ee51c292c331ea1f26d745a5fc280fb3f439 # funds: close deposits, withdrawals and authorizations
+
+# Architectural rewrite of lib/ecash.ts + routes/ecash.ts. Changes /claim
+# semantics and removes routes, so it is a redesign to adopt deliberately,
+# not a patch to merge. This fork's ecash path has since diverged anyway
+# (keyset-based ext() in 78d4c0af, the mint-URL SSRF fix, ecashEnabled
+# gating). Revisit as a planned piece of work, not as a sync item.
+c72fa2a5ccf1cc04073f9ff12606491971dadd36 # ecash: redeem tokens by melting to the user's own invoice
+
+# A feature (up-front routing-fee quote + a max-send quote endpoint), not a
+# fix. Its lib/payments.ts hunks conflict with clnPartsAllFailed, this fork's
+# guard against paying an invoice twice across the CLN/LND fallback — which
+# is load-bearing and hard-won. Not worth disturbing for a quote. Revisit if
+# the quote endpoint is actually wanted, and expect to redo the conflict
+# resolution against whatever payments.ts looks like then.
+5929817e0436979821980abf2f5f4b8a187e8654 # lightning: quote the routing fee up front and add a max-send quote endpoint
+
+# Logging for the quote mechanism above; meaningless without it.
+23c8b11bd3c1dee56781cc83e65e077409c0858e # lightning: log quote outcomes
