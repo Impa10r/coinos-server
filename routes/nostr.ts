@@ -86,6 +86,10 @@ export default {
 
       event = await get({ ids: [id] });
       if (!full) return c.json(event);
+      // Only the `full` path is tightened: it goes on to parse the event, and
+      // parseContent(undefined) threw. The plain path's existing 200-with-null
+      // is left alone rather than changed underneath its callers.
+      if (!event) return bail(c, "event not found", 404);
 
       const parts = parseContent(event);
 
@@ -181,6 +185,9 @@ export default {
       const id = c.req.param("id");
 
       const event = await get({ ids: [id] });
+      // An unknown id resolves to undefined, and reading .tags off it threw a
+      // TypeError that bail() reported as a 500. A thread nobody has is a 404.
+      if (!event) return bail(c, "thread not found", 404);
 
       const rootId = event.tags.find((tag) => tag[0] === "e" && tag[3] === "root")?.[1];
 
@@ -438,10 +445,30 @@ export default {
   },
 
   async profile(c) {
+    // Had no try/catch: decode() throws on anything that is not a valid
+    // npub/nprofile, and the throw escaped to app.onError as an unhandled
+    // 500 — so a typo in a url was logged as a server fault. It is bad input.
     const profile = c.req.param("profile");
-    const { data } = decode(profile);
-    const { pubkey, relays } = data as any;
+    let pubkey: string | undefined;
+    let relays: string[] | undefined;
+    try {
+      // decode() returns a different shape per type: an nprofile carries
+      // { pubkey, relays }, but an npub's data is the bare hex pubkey STRING.
+      // The old code destructured { pubkey, relays } from both, so every npub
+      // yielded pubkey === undefined, and getProfile(undefined) quietly
+      // returned an anon placeholder and cached it under "profile:undefined".
+      // So this route has never worked for an npub; it only looked like it did.
+      const { type, data } = decode(profile) as { type: string; data: any };
+      if (type === "npub") pubkey = data as string;
+      else if (type === "nprofile") ({ pubkey, relays } = data);
+      else return bail(c, "invalid profile", 400);
+    } catch {
+      return bail(c, "invalid profile", 400);
+    }
+    if (!pubkey) return bail(c, "invalid profile", 400);
+
     const recipient = await (getProfile as any)(pubkey, relays);
+    if (!recipient) return bail(c, "profile not found", 404);
     recipient.relays = relays;
     return c.json(recipient);
   },
@@ -450,7 +477,9 @@ export default {
     try {
       const body = await c.req.json();
       const { amount, id } = body;
-      const { pubkey } = await get({ ids: [id] });
+      const target = await get({ ids: [id] });
+      if (!target) return bail(c, "event not found", 404);
+      const { pubkey } = target;
       const event = await (makeZapRequest as any)({
         profile: pubkey,
         event: id,
