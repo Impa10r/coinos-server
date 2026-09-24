@@ -136,19 +136,15 @@ if (prod) {
     // not includes(): a substring test would rope in any future path
     // containing "pin".
     //
-    // /email, /freeze and /admin/sanitize-images join them because each tests a
-    // caller-supplied string against config.adminpass — the master credential
-    // login() accepts as any account's password — and each answers differently
-    // on a hit. That makes them online guessing oracles, and they are all
-    // unauthenticated, so the general 2000-req/2s bucket was the only thing
-    // bounding an attacker. Exact matches: these are fixed paths.
+    // /email is here too: it is unauthenticated and sends mail, so it is worth
+    // bounding on its own account. (/freeze and /admin/sanitize-images were
+    // also listed while they existed as adminpass oracles; both endpoints are
+    // gone.) Exact match, not includes().
     const isStrict =
       url.includes("/login") ||
       url.includes("/send") ||
       url === "/pin" ||
-      url === "/email" ||
-      url === "/freeze" ||
-      url === "/admin/sanitize-images";
+      url === "/email";
     if (isStrict) {
       // Keying on UA alone lets anyone bypass this by rotating the header.
       // Tie it to the authenticated account when there's a valid session

@@ -143,7 +143,10 @@ describe("S2 — passwords hashed at bcrypt cost 12", () => {
   });
 });
 
-describe("S3 — adminpass login fails closed", () => {
+describe("S3 — login accepts nothing but the account's own password", () => {
+  // Originally "adminpass fails closed": config.adminpass was a master password
+  // that logged in as any account. It has since been removed outright, so the
+  // property is simply that only the real password works.
   // A rejected login sleeps 5s before answering, on purpose — the
   // anti-bruteforce penalty in routes/users.ts login(). That is exactly bun's
   // default per-test timeout, so these two were racing the server's own delay
@@ -370,20 +373,29 @@ describe("session revocation — a password change ends older sessions", () => {
   });
 });
 
-describe("adminpass oracle — /email answers the same either way", () => {
-  // POST /email is unauthenticated and used to accept config.adminpass as a
-  // captcha bypass, returning {ok:true} for a correct guess and "failed
-  // captcha" otherwise. Since login() takes adminpass as any account's
-  // password, that made an unauthenticated endpoint an online oracle for a
-  // master credential. The bypass is gone; both answers must now be identical.
-  const send = (token: string) =>
-    post("/email", { email: "probe@example.invalid", message: "probe", token });
+describe("no master password, and /email has no credential bypass", () => {
+  // config.adminpass was a master password: supplied as any account's password
+  // it logged in as that account, and three unauthenticated endpoints (/email's
+  // captcha bypass, /freeze, /admin/sanitize-images) answered differently for a
+  // correct guess, making each an online oracle for it. The credential and all
+  // three endpoints are gone.
+  test("the removed admin endpoints are not routed", async () => {
+    expect((await post("/freeze", { secret: "x" })).status).toBe(404);
+    expect((await post("/admin/sanitize-images", { secret: "x" })).status).toBe(404);
+    expect((await post("/reset", { username, password: "x" })).status).toBe(404);
+  });
 
-  test("a correct adminpass guess is indistinguishable from a wrong one", async () => {
+  test("/email answers uniformly whatever token it is given", async () => {
+    const send = (token: string) =>
+      post("/email", { email: "probe@example.invalid", message: "probe", token });
+    const a = await send("aaaaaaaa");
+    const b = await send("bbbbbbbb");
+    expect(a.status).toBe(b.status);
+    expect(await a.text()).toBe(await b.text());
+  });
+
+  test("config carries no adminpass", async () => {
     const config = (await import("$config")).default as any;
-    const wrong = await send("definitely-not-the-adminpass");
-    const right = await send(String(config.adminpass));
-    expect(right.status).toBe(wrong.status);
-    expect(await right.text()).toBe(await wrong.text());
+    expect(config.adminpass).toBeFalsy();
   });
 });

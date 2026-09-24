@@ -73,7 +73,6 @@ export default {
   // SECURITY: the admin login path is disabled when this is empty (fails
   // closed). Set a strong, unique value only if you need admin impersonation;
   // never ship the sample value.
-  adminpass: "",
   txWebhookSecret: process.env.TX_WEBHOOK_SECRET || "pwa",
   domain: "coinos.io",
   // Used by lib/bip353.ts (per-user BIP-353 DNS records) and lib/auth.ts (auto-

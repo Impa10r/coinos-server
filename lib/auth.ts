@@ -313,9 +313,10 @@ export const optional = async (c, next) => {
   await next();
 };
 
-// The `admin` middleware was removed with its only two consumers, POST
-// /hidepay and POST /unlimit. The remaining admin-gated paths (reset(),
-// sanitizeImages()) compare config.adminpass inside the handler instead.
+// There is no `admin` middleware and no admin surface left to gate. POST
+// /hidepay and POST /unlimit went first; then reset(), sanitizeImages(),
+// /freeze and the config.adminpass master login were removed outright —
+// operator access to state is via redis directly, not over HTTP.
 
 // The pin is a credential, so it is stored as a digest, never compared with
 // `!==`, and checked in one place rather than three.
@@ -337,24 +338,6 @@ const constantEqual = (a: string, b: string) => {
   const x = Buffer.from(a);
   const y = Buffer.from(b);
   return x.length === y.length && timingSafeEqual(x as any, y as any);
-};
-
-// config.adminpass is a MASTER credential: routes/users.ts login() accepts it as
-// the password for any account. Three unauthenticated endpoints test a supplied
-// string against it — POST /email (as a captcha bypass), POST /freeze and POST
-// /admin/sanitize-images — and each answers differently on a hit, so each is an
-// online guessing oracle. They were comparing with `===`, which both short
-// -circuits on the first differing byte and leaks the length.
-//
-// Digest both sides before comparing: sha256 is fixed-width, so the comparison
-// is constant-time over a constant length and reveals neither. Fails closed on
-// an unset adminpass and on anything that is not a non-empty string, so an
-// omitted field can never coincide with an unset config value.
-export const adminpassMatches = (supplied: unknown): boolean => {
-  const configured = (config as any)?.adminpass;
-  if (typeof configured !== "string" || !configured) return false;
-  if (typeof supplied !== "string" || !supplied) return false;
-  return constantEqual(hashPin(supplied), hashPin(configured));
 };
 
 export const pinMatches = (user: any, supplied: unknown): boolean => {

@@ -1,6 +1,6 @@
 import config from "$config";
 import api from "$lib/api";
-import { adminpassMatches, evictUser, requirePin } from "$lib/auth";
+import { evictUser, requirePin } from "$lib/auth";
 import { archive, db, g, gf, gfAll, s, sa } from "$lib/db";
 import { getTx } from "$lib/esplora";
 import { generate, getUserOffer } from "$lib/invoices";
@@ -771,8 +771,9 @@ export default {
     if (ourWallet && wallet && wallet !== ourWallet) return c.json({});
 
     try {
-      // Was checked against config.adminpass — the same credential that
-      // grants admin login/impersonation and controls /freeze. walletnotify
+      // Was checked against config.adminpass, which at the time also granted
+      // admin login/impersonation and controlled /freeze (all since removed).
+      // Keeping this secret separate still matters: walletnotify
       // puts this secret on a shell command line in bitcoin.conf (visible
       // via `ps` while it runs) and sends it over plain HTTP; it must never
       // double as the admin password.
@@ -1017,28 +1018,6 @@ export default {
     }
   },
 
-  async freeze(c) {
-    try {
-      let body: any;
-      try {
-        body = await c.req.json();
-      } catch {
-        return c.json({ error: "invalid JSON body" }, 400);
-      }
-      const secret = body?.secret;
-      if (typeof secret !== "string" || !secret) {
-        return c.json({ error: "missing secret" }, 400);
-      }
-      if (!adminpassMatches(secret)) {
-        return c.json({ error: "unauthorized" }, 401);
-      }
-      await s("freeze", true);
-      return c.json({ ok: true });
-    } catch (e: any) {
-      warn("freeze failed", e.message);
-      return c.json({ error: e?.message ?? "internal error" }, 500);
-    }
-  },
 
 
   async lnaddress(c) {

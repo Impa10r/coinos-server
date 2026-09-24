@@ -190,7 +190,6 @@ app.get(
 app.get("/pay/:username", lnurl.pay);
 app.get("/pay/:username/:amount", lnurl.pay);
 
-app.post("/freeze", payments.freeze);
 
 app.post("/confirm", payments.confirm);
 app.post("/bitcoin/tx", payments.txWebhook);
@@ -208,18 +207,15 @@ app.get("/accounts", auth, users.accounts);
 app.post("/accounts", auth, users.createAccount);
 
 app.get("/users", auth, users.list);
-app.post("/admin/sanitize-images", users.sanitizeImages);
 app.get("/me", auth, users.me);
 app.get("/ro", auth, users.ro);
 app.get("/credits", auth, users.credits);
-app.get("/users/delete/:username", users.del);
 app.get("/users/:key", users.get);
 app.post("/signup", users.create);
 app.post("/disable2fa", auth, users.disable2fa);
 app.post("/2fa", auth, users.enable2fa);
 app.post("/user", auth, users.update);
 app.post("/delete", auth, users.deleteSelf);
-app.post("/reset", optional, users.reset);
 app.post("/upload/:type", auth, users.upload);
 app.get("/verify/:code", users.verify);
 app.post("/request", auth, users.request);

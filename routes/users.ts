@@ -17,7 +17,7 @@ const sanitizeImageUrl = (url: string | undefined): string | undefined => {
   return url;
 };
 import config from "$config";
-import { adminpassMatches, hashPin, isEvicted, pinMatches, requirePin } from "$lib/auth";
+import { hashPin, isEvicted, pinMatches, requirePin } from "$lib/auth";
 import { db, g, ga, gf, gfAll, s, scan } from "$lib/db";
 import { err, l, warn } from "$lib/logging";
 import { mail, templates } from "$lib/mail";
@@ -97,11 +97,10 @@ const verifyRecaptcha = async (response, c?, body?) => {
     // A real verdict from Google: fail CLOSED only when the captcha itself is
     // invalid (success === false).
     //
-    // The `|| response === config.adminpass` bypass that used to be here is
-    // gone. It put a master credential in a captcha field — somewhere it gets
-    // logged, proxied and sent to Google — and made every caller of this an
-    // online oracle for it. It was also dead weight for login(), which already
-    // skips the captcha entirely when isAdmin.
+    // A `|| response === config.adminpass` bypass used to sit here. It put a
+    // master credential in a captcha field — a value that gets logged, proxied
+    // and sent to Google — and made every caller of this an online oracle for
+    // it. config.adminpass has since been removed outright.
     return success;
   } catch (e) {
     // Fail OPEN on an INFRASTRUCTURE error (network blip, timeout, Google 5xx).
@@ -144,65 +143,6 @@ export default {
       warn("problem fetching user", e.message);
       return c.json(e.message, 500);
     }
-  },
-
-  async sanitizeImages(c) {
-    const { secret } = await c.req.json().catch(() => ({}));
-    if (!adminpassMatches(secret)) fail("unauthorized", 401);
-
-    let count = 0;
-    for await (const k of scan("user:*")) {
-      let u: any;
-      try {
-        u = await g(k);
-      } catch {
-        continue;
-      }
-      if (!u || typeof u !== "object" || !u.id) continue;
-      let changed = false;
-      for (const field of ["picture", "banner"]) {
-        const sanitized = sanitizeImageUrl(u[field]);
-        if (sanitized !== u[field]) {
-          u[field] = sanitized;
-          changed = true;
-        }
-      }
-      if (changed) {
-        await s(k, u);
-        count++;
-      }
-    }
-
-    // Also fix cached contact lists
-    let contactsFixed = 0;
-    for await (const k of scan("*:contacts")) {
-      let contacts: any[];
-      try {
-        const raw = await db.get(k);
-        if (!raw) continue;
-        contacts = JSON.parse(raw as string);
-        if (!Array.isArray(contacts)) continue;
-      } catch {
-        continue;
-      }
-      let changed = false;
-      for (const contact of contacts) {
-        if (!contact || typeof contact !== "object") continue;
-        for (const field of ["picture", "banner"]) {
-          const sanitized = sanitizeImageUrl(contact[field]);
-          if (sanitized !== contact[field]) {
-            contact[field] = sanitized;
-            changed = true;
-          }
-        }
-      }
-      if (changed) {
-        await db.set(k, JSON.stringify(contacts));
-        contactsFixed++;
-      }
-    }
-
-    return c.json({ sanitized: count, contactsFixed });
   },
 
   async list(c) {
@@ -599,17 +539,15 @@ export default {
       if (ipCount === 1) await db.expire(ipKey, 10);
       if (prod && Number(ipCount) > 30) return c.json({}, 429);
 
-      // Fail closed: an unset adminpass must never authenticate, and an omitted
-      // password field must never coincide with an unset value (undefined ===
-      // undefined). adminpassMatches enforces both, and compares digests so the
-      // check leaks neither the length nor a prefix through timing.
-      const isAdmin = adminpassMatches(password);
-
-      if (!isAdmin) {
-        const recaptchaOk = await verifyRecaptcha(recaptcha, c, body);
-        if (!recaptchaOk) {
-          return c.json("failed captcha", 401);
-        }
+      // config.adminpass is gone. It was a master password: supplied as any
+      // account's password it logged in as that account, and it additionally
+      // skipped the captcha, the per-IP lockout and the per-user lockout below.
+      // One string owned every account, and three unauthenticated endpoints
+      // would tell you whether a guess was right. Operator access to an account
+      // is via redis directly.
+      const recaptchaOk = await verifyRecaptcha(recaptcha, c, body);
+      if (!recaptchaOk) {
+        return c.json("failed captcha", 401);
       }
 
       username = username.toLowerCase().replace(/\s/g, "");
@@ -618,14 +556,14 @@ export default {
       const fk = `${username}:failures`;
       const ipFailKey = `ip:${ip}:login:fail`;
       const ipFailures = await g(ipFailKey);
-      if (!isAdmin && Number(ipFailures) > 5) return c.json({ message: "locked" }, 429);
+      if (Number(ipFailures) > 5) return c.json({ message: "locked" }, 429);
 
       const userFailures = await g(fk);
-      if (!isAdmin && Number(userFailures) > 5) return c.json({ message: "locked" }, 429);
+      if (Number(userFailures) > 5) return c.json({ message: "locked" }, 429);
 
       let user = await getUser(username);
 
-      if (!isAdmin) {
+      {
         let verified = false;
         try {
           if (user?.password) verified = await Bun.password.verify(password, user.password);
@@ -977,40 +915,6 @@ export default {
     return c.json(combined);
   },
 
-  async del(c) {
-    let username = c.req.param("username");
-    const authorization = c.req.header("authorization");
-    // Disabled. It threw, which escaped to app.onError as an "unhandled error"
-    // 500 — noise in the logs, and a 500 tells a prober the route exists and
-    // does something. Answer like an unregistered route instead, matching what
-    // the admin reset endpoint already does. Everything below is unreachable
-    // and kept only as a record of what it used to do.
-    return c.json(
-      { message: "Route GET:/users/delete not found", error: "Not Found", statusCode: 404 },
-      404,
-    );
-    username = username.toLowerCase();
-    if (!authorization?.includes(config.admin)) return c.json("unauthorized", 401);
-
-    const { id, pubkey } = await g(
-      `user:${await g(`user:${username.replace(/\s/g, "").toLowerCase()}`)}`,
-    );
-    const invoices = await db.lRange(`${id}:invoices`, 0, -1);
-    const payments = await db.lRange(`${id}:payments`, 0, -1);
-
-    for (const inv of invoices) db.del(`invoice:${(inv as any).id}`);
-    for (const pay of payments) db.del(`payment:${(pay as any).id}`);
-    db.del(`user:${username.toLowerCase()}`);
-    db.del(`user:${id}`);
-    db.del(`user:${pubkey}`);
-
-    return c.json({});
-  },
-
-  // Authenticated self-delete: wipes every key tied to the calling user,
-  // mirroring scripts/delall-legacy.ts. Gated by typing the username (works for
-  // password and nostr accounts alike) and refuses while a balance remains so a
-  // user can't accidentally destroy funds.
   async deleteSelf(c) {
     try {
       const user = c.get("user");
@@ -1121,72 +1025,6 @@ export default {
       } catch {}
       return c.json({ deleted: true });
     } catch (e) {
-      return bail(c, e);
-    }
-  },
-
-  async reset(c) {
-    const body = await c.req.json();
-    const { code, username, password } = body;
-    const u = c.get("user");
-    try {
-      let id;
-      let user;
-
-      // Non-admins must not be able to tell this admin-only endpoint exists.
-      // Log the probe (so exploit-watch can flag it) but return a generic 404
-      // identical to an unregistered route — previously it returned "disabled",
-      // which confirmed the endpoint AND its admin-gating to attackers.
-      if (u?.username !== config.admin) {
-        err("password reset failed disabled", c.req.header("cf-connecting-ip"));
-        return c.json(
-          { message: "Route POST:/reset not found", error: "Not Found", statusCode: 404 },
-          404,
-        );
-      }
-      id = await g(`user:${username.toLowerCase().replace(/\s/g, "")}`);
-      user = await g(`user:${id}`);
-
-      if (!user) fail("user not found", 404);
-
-      warn("password reset", user.username, code, c.req.header("cf-connecting-ip"));
-
-      user.pin = null;
-      user.nsec = null;
-      user.authPubkey = null;
-
-      user.password = await Bun.password.hash(password, {
-        algorithm: "bcrypt",
-        cost: 12,
-      });
-
-      // End every existing session for this account. reset() is the incident
-      // response for a compromised account, and it also clears the pin above —
-      // so leaving old tokens alive handed an attacker a still-valid session
-      // with the send gate now removed.
-      await db.set(`tokens:since:${id}`, Math.floor(Date.now() / 1000));
-
-      await s(`user:${id}`, user);
-      await db.del(`reset:${code}`);
-
-      const un = username.toLowerCase().replace(/\s/g, "");
-      await db.del(`${un}:failures`);
-
-      // scanIterator yields BATCHES of keys, not keys — and it yields a batch
-      // for every chunk of the keyspace it walks, most of which match nothing.
-      // `db.del(<empty array>)` is `DEL` with no arguments, which redis rejects
-      // ("ERR wrong number of arguments"), so this loop threw on its first
-      // iteration whenever there were no login-failure keys — the normal case.
-      // reset() had already written the new password by then, so the account
-      // was reset but the caller got a 500 and "password reset failed" in the
-      // log: the worst possible signal during incident response.
-      for await (const keys of db.scanIterator({ MATCH: "ip:*:login:fail" })) {
-        if (keys.length) await db.del(keys);
-      }
-
-      return c.json(pick(user, whitelist));
-    } catch (e) {
-      err("password reset failed", e.message, c.req.header("cf-connecting-ip"));
       return bail(c, e);
     }
   },

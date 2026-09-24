@@ -217,7 +217,6 @@ if (process.env.INTEGRATION) {
       },
       lightning: "/dev/null",
       fee: { bitcoin: 0.004, liquid: 0.001, lightning: 0.001 },
-      adminpass: "test",
       ark: { arkPrivateKey: "0000", arkServerUrl: "http://localhost" },
       nostr: "ws://localhost:7777",
       tigerbeetle: { cluster_id: 0n, replica_addresses: ["localhost:3000"] },
