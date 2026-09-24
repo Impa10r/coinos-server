@@ -279,3 +279,54 @@ describe("S8 / fnd-007 — the spend/cash mutex serializes critical sections", (
     expect(order).toEqual([1, 2, 3]);
   });
 });
+
+describe("ro-token — the read-only POS token cannot write merchant config", () => {
+  // users.ro issues `{ id: "<uid>-ro" }`, and lib/auth.ts upgrades it to the
+  // full uid on an allowlist of routes. That allowlist used to prefix-match the
+  // url, so `POST "/invoice"` also matched POST /invoice/:id -> invoices.update,
+  // whose webhook+secret branch checks only `invoice.uid === c.get("user")?.id`
+  // — which the upgrade satisfies. The token is flashed into POS printer
+  // firmware, so a device pulled off a shop counter could repoint the
+  // merchant's payment notifications. Matching the resolved route pattern
+  // instead closes it without touching what a POS legitimately does.
+  let A: any, RO: any, meId: string, invId: string;
+
+  beforeAll(async () => {
+    const u = `rosec${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    const reg = await post("/signup", { user: { username: u, password } });
+    const { token } = await reg.json();
+    A = { authorization: `Bearer ${token}` };
+    meId = (await (await fetch(`${API}/me`, { headers: A })).json()).id;
+    const ro = await (await fetch(`${API}/ro`, { headers: A })).json();
+    RO = { authorization: `Bearer ${ro}` };
+    invId = (await (await post("/invoice", { invoice: { amount: 500, type: "lightning" } }, RO)).json()).id;
+  });
+
+  test("a POS invoice is still raised under the merchant, not anonymously", () => {
+    expect(invId).toBeTruthy();
+  });
+
+  test("the read-only token still reads payments and invoices", async () => {
+    expect((await fetch(`${API}/payments`, { headers: RO })).status).toBe(200);
+    expect((await fetch(`${API}/invoices`, { headers: RO })).status).toBe(200);
+  });
+
+  test("a tip may still be set — that branch requires no ownership by design", async () => {
+    const r = await post(`/invoice/${invId}`, { invoice: { tip: 120 } }, RO);
+    expect(r.status).toBe(200);
+    expect((await r.json()).tip).toBe(120);
+  });
+
+  test("the read-only token cannot repoint the webhook", async () => {
+    const r = await post(`/invoice/${invId}`, { invoice: { webhook: "https://attacker.example/h", secret: "s" } }, RO);
+    expect(r.status).not.toBe(200);
+    const inv = await (await fetch(`${API}/invoice/${invId}`)).json();
+    expect(inv.webhook).not.toBe("https://attacker.example/h");
+  });
+
+  test("the owner's full token still can", async () => {
+    const r = await post(`/invoice/${invId}`, { invoice: { webhook: "https://merchant.example/h", secret: "s" } }, A);
+    expect(r.status).toBe(200);
+    expect((await r.json()).webhook).toBe("https://merchant.example/h");
+  });
+});

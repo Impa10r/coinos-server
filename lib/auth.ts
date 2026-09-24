@@ -239,11 +239,32 @@ const authenticate = async (c) => {
   try {
     const payload = jwt.verify(token, config.jwt);
     let { id } = payload as any;
-    const url = c.req.path;
     const method = c.req.method;
 
-    const wl = { GET: ["/invoice", "/payments"], POST: ["/invoice"] };
-    if (id.endsWith("-ro") && wl[method]?.some((p) => url.startsWith(p))) id = id.slice(0, -3);
+    // Read-only tokens (users.ro) carry "<uid>-ro" and are upgraded to the
+    // full uid only on the routes a POS terminal actually needs. lib/sockets.ts
+    // mirrors this for websockets, with the intent stated there: a POS device
+    // "can log in and receive payment events, but nothing else".
+    //
+    // Match the RESOLVED ROUTE PATTERN, not a url prefix. `startsWith("/invoice")`
+    // also matched POST /invoice/:id -> invoices.update, whose webhook+secret
+    // branch is gated on `invoice.uid === c.get("user")?.id` — exactly the check
+    // this upgrade satisfies. A read-only token could therefore rewrite the
+    // webhook destination and secret on the merchant's own invoices, pointing
+    // payment notifications (address, amount, hash, memo, and the shared secret)
+    // at a url of its choosing and silently cutting off the real integration.
+    // That token is flashed into POS printer firmware and lives on a device in a
+    // shop, so treating it as read-only is the whole point of issuing it.
+    //
+    // POST /invoice stays: invoices.create takes `optional` auth, and without the
+    // upgrade the invoice is raised anonymously instead of under the merchant.
+    // Tip updates on /invoice/:id keep working for everyone — that branch
+    // deliberately requires no ownership, so the POS is unaffected.
+    const wl = {
+      GET: ["/invoices", "/payments", "/payments/:hash"],
+      POST: ["/invoice"],
+    };
+    if (id.endsWith("-ro") && wl[method]?.includes(c.req.routePath)) id = id.slice(0, -3);
 
     const user = await getUser(id);
     if (await isEvicted(c, user)) return null;
