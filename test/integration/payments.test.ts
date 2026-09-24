@@ -347,4 +347,31 @@ describe("fund take authorizes before it spends", () => {
     const res = await take(a.token, { id: fundId, amount: 1000 });
     expect(res.id).toBeTruthy();
   }, 60000);
+
+  // The reason the manager check is `managers.length && !includes(user.id)`
+  // rather than a flat ownership test: a gift fund has NO managers. coinos-ui
+  // creates one at /send/fund/<uuid>/<amount>, which is POST /payments with a
+  // `fund` field and registers nobody as a manager; the link is then shared and
+  // whoever opens it calls /take. Hoisting the check must not disturb that.
+  test("a gift link is still claimable by a stranger", async () => {
+    const ts = Date.now();
+    const giver = await register(`giver${ts}`, "testpass123");
+    const stranger = await register(`strangr${ts}`, "testpass123");
+    await fundViaLightning(giver.token, 200_000);
+
+    const fundId = crypto.randomUUID();
+    await api("/payments", giver.token, {
+      method: "POST",
+      body: JSON.stringify({ fund: fundId, amount: 5000 }),
+    });
+
+    // No managers is precisely what leaves the fund open.
+    const managers = await (await fetch(`${APP}/fund/${fundId}/managers`)).json();
+    expect((managers as any[]).length).toBe(0);
+
+    const before = (await getMe(stranger.token)).balance;
+    const res = await take(stranger.token, { id: fundId, amount: 5000 });
+    expect(res.id).toBeTruthy();
+    expect((await getMe(stranger.token)).balance).toBe(before + 5000);
+  }, 60000);
 });
