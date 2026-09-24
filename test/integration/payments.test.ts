@@ -321,8 +321,10 @@ describe("fund take authorizes before it spends", () => {
 
     expect((await authorize(a.token, { id: fundId, fiat: 1, currency: "USD" })).authId).toBeTruthy();
 
+    // Authenticated as the manager: a managed fund's authorizations are no
+    // longer readable anonymously (see the visibility tests below).
     const listAuths = async () =>
-      (await (await fetch(`${APP}/fund/${fundId}/authorizations`)).json()) as any[];
+      (await api(`/fund/${fundId}/authorizations`, a.token)) as any[];
     expect((await listAuths()).length).toBe(1);
     const before = (await getMe(a.token)).balance;
 
@@ -373,5 +375,61 @@ describe("fund take authorizes before it spends", () => {
     const res = await take(stranger.token, { id: fundId, amount: 5000 });
     expect(res.id).toBeTruthy();
     expect((await getMe(stranger.token)).balance).toBe(before + 5000);
+  }, 60000);
+
+  // A fund with managers is private to them; a fund with none is a bearer
+  // instrument and stays public. Same predicate take()/authorize() use, so
+  // visibility and spendability cannot drift apart.
+  test("a managed fund is readable only by its managers", async () => {
+    const ts = Date.now();
+    const mgr = await register(`vismgr${ts}`, "testpass123");
+    const out = await register(`visout${ts}`, "testpass123");
+    await fundViaLightning(mgr.token, 200_000);
+
+    const fundId = crypto.randomUUID();
+    await api("/payments", mgr.token, {
+      method: "POST",
+      body: JSON.stringify({ fund: fundId, amount: 5000 }),
+    });
+    await api("/fund/managers", mgr.token, {
+      method: "POST",
+      body: JSON.stringify({ id: fundId, username: `vismgr${ts}` }),
+    });
+    await authorize(mgr.token, { id: fundId, fiat: 1, currency: "USD" });
+
+    const anon = (p: string) => fetch(`${APP}${p}`);
+    const as = (p: string, t: string) =>
+      fetch(`${APP}${p}`, { headers: { Authorization: `Bearer ${t}` } });
+
+    expect((await anon(`/fund/${fundId}`)).status).toBe(400);
+    expect((await as(`/fund/${fundId}`, out.token)).status).toBe(400);
+    expect((await as(`/fund/${fundId}`, mgr.token)).status).toBe(200);
+
+    expect((await anon(`/fund/${fundId}/managers`)).status).toBe(400);
+    expect((await as(`/fund/${fundId}/managers`, mgr.token)).status).toBe(200);
+
+    expect((await anon(`/fund/${fundId}/authorizations`)).status).toBe(400);
+    expect((await as(`/fund/${fundId}/authorizations`, mgr.token)).status).toBe(200);
+
+    // The refusal must not confirm the id is real.
+    const missing = await anon(`/fund/${crypto.randomUUID()}`);
+    const hidden = await anon(`/fund/${fundId}`);
+    expect(hidden.status).toBe(missing.status);
+    expect(await hidden.text()).toBe(await missing.text());
+  }, 60000);
+
+  test("a gift fund stays readable by anyone", async () => {
+    const ts = Date.now();
+    const giver = await register(`visgive${ts}`, "testpass123");
+    await fundViaLightning(giver.token, 200_000);
+
+    const fundId = crypto.randomUUID();
+    await api("/payments", giver.token, {
+      method: "POST",
+      body: JSON.stringify({ fund: fundId, amount: 5000 }),
+    });
+
+    expect((await fetch(`${APP}/fund/${fundId}`)).status).toBe(200);
+    expect((await fetch(`${APP}/fund/${fundId}/managers`)).status).toBe(200);
   }, 60000);
 });

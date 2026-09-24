@@ -46,6 +46,18 @@ const safeEqual = (a: string, b: string) => {
   return bufA.length === bufB.length && timingSafeEqual(bufA as any, bufB as any);
 };
 
+// A fund with managers is private to them; a fund with none is a bearer
+// instrument — the gift-link case — and stays readable by anyone holding the
+// id. Same predicate take() and authorize() already use, so visibility and
+// spendability agree instead of drifting apart.
+//
+// Callers answer with the identical "fund not found" a missing fund gets, so
+// the gate never confirms that an id is real to someone not entitled to it.
+const fundHidden = async (fid: string, uid?: string) => {
+  const managers = [...(await db.sMembers(`fund:${fid}:managers`))];
+  return managers.length > 0 && !(uid && managers.includes(uid));
+};
+
 export default {
   async info(c) {
     return c.json(await ln.getinfo());
@@ -419,6 +431,8 @@ export default {
 
       if (amount === null) return bail(c, "fund not found");
 
+      if (await fundHidden(fid, c.get("user")?.id)) return bail(c, "fund not found");
+
       let payments = (await db.lRange(`fund:${fid}:payments`, 0, -1)) || [];
       payments = await Promise.all(payments.map((hash) => gf(`payment:${hash}`)));
       // Filter out stale/missing payment ids BEFORE looking up .user on each —
@@ -501,6 +515,9 @@ export default {
 
   async listAuthorizations(c) {
     const id = c.req.param("id");
+    // These records name the authorizer and their fiat ceiling — a managed
+    // fund's funding commitments, which were readable by anyone with the id.
+    if (await fundHidden(id, c.get("user")?.id)) return bail(c, "fund not found");
     const authIds = (await db.lRange(`fund:${id}:authorizations`, 0, -1)) || [];
     const allAuths = await Promise.all(authIds.map((authId) => g(`authorization:${authId}`)));
     const authorizations = allAuths.filter((a) => a && !a.claimed);
@@ -675,6 +692,9 @@ export default {
     const name = c.req.param("name");
 
     const ids = [...(await db.sMembers(`fund:${name}:managers`))];
+    // Empty set = a bearer fund, and the empty list is the honest answer. A
+    // non-empty one belongs to its managers.
+    if (ids.length && !ids.includes(c.get("user")?.id)) return bail(c, "fund not found");
 
     const managers = (await Promise.all(ids.map(async (id) => await getUser(id, fields)))).filter(
       Boolean,
