@@ -543,6 +543,21 @@ export default {
         if (!whitelisted) fail("This fund has been disabled");
       }
 
+      // Authorize BEFORE anything with a side effect. This check used to sit
+      // further down, after the authorization block below had already claimed
+      // an authorization, debited its author and credited the fund — so a
+      // caller who was about to be refused still consumed someone else's
+      // single-use authorization and moved their money. Reproduced on regtest:
+      // a non-manager's /take returned 401 while the authorizer went 200000 ->
+      // 199000 sat and their authorization went from unclaimed to burned. The
+      // attacker gains nothing, which is why it reads as a griefing primitive
+      // rather than theft, and GET /fund/:id/authorizations needs no auth, so
+      // the targets are enumerable.
+      //
+      // A fund with no managers is open by design — that is the gift-link case.
+      const managers = [...(await db.sMembers(`fund:${id}:managers`))];
+      if (managers.length && !managers.includes(user.id)) fail("Unauthorized", 401);
+
       amount = Number.parseInt(amount);
       if (!Number.isFinite(amount) || amount <= 0) fail("Invalid amount");
 
@@ -633,9 +648,6 @@ export default {
           }
         }
       }
-
-      const managers = [...(await db.sMembers(`fund:${id}:managers`))];
-      if (managers.length && !managers.includes(user.id)) fail("Unauthorized", 401);
 
       const result: any = await tbFundDebit(id, amount, "Insufficient funds");
       if (result.err) fail(result.err);

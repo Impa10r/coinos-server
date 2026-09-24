@@ -294,3 +294,57 @@ describe("v3 migration flag", () => {
     expect(after.migrated).toBe(true);
   }, 15000);
 });
+
+// =====================================================================
+// A refused /take must leave nothing behind
+// =====================================================================
+
+describe("fund take authorizes before it spends", () => {
+  // take() used to read the fund's manager list and refuse AFTER the
+  // authorization block had already claimed an authorization, debited its
+  // author and credited the fund. So a caller on their way to a 401 still
+  // consumed someone else's single-use authorization and moved their money,
+  // while gaining nothing themselves. GET /fund/:id/authorizations needs no
+  // auth, so the targets were enumerable.
+  test("a non-manager is refused without consuming the authorization", async () => {
+    const ts = Date.now();
+    const a = await register(`fundmgr${ts}`, "testpass123");
+    const b = await register(`fundout${ts}`, "testpass123");
+    await fundViaLightning(a.token, 200_000);
+
+    // addManager only founds a brand-new fund under a uuid id.
+    const fundId = crypto.randomUUID();
+    await api("/fund/managers", a.token, {
+      method: "POST",
+      body: JSON.stringify({ id: fundId, username: `fundmgr${ts}` }),
+    });
+
+    expect((await authorize(a.token, { id: fundId, fiat: 1, currency: "USD" })).authId).toBeTruthy();
+
+    const listAuths = async () =>
+      (await (await fetch(`${APP}/fund/${fundId}/authorizations`)).json()) as any[];
+    expect((await listAuths()).length).toBe(1);
+    const before = (await getMe(a.token)).balance;
+
+    await take(b.token, { id: fundId, amount: 1000 });
+
+    expect((await getMe(a.token)).balance).toBe(before);
+    expect((await listAuths()).length).toBe(1);
+  }, 60000);
+
+  test("the fund's own manager can still take", async () => {
+    const ts = Date.now();
+    const a = await register(`fundok${ts}`, "testpass123");
+    await fundViaLightning(a.token, 200_000);
+
+    const fundId = crypto.randomUUID();
+    await api("/fund/managers", a.token, {
+      method: "POST",
+      body: JSON.stringify({ id: fundId, username: `fundok${ts}` }),
+    });
+    await authorize(a.token, { id: fundId, fiat: 1, currency: "USD" });
+
+    const res = await take(a.token, { id: fundId, amount: 1000 });
+    expect(res.id).toBeTruthy();
+  }, 60000);
+});
