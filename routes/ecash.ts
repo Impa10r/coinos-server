@@ -127,6 +127,16 @@ export default {
     let { amount, bolt11: hash, preimage } = body;
     try {
       amount = Math.round(amount / 1000);
+      // A negative (or NaN) amount here is a direct ledger-inflation primitive.
+      // tbDebit's sufficiency check is `balance - frozen < total`, which any
+      // non-negative balance passes trivially against a negative total, and the
+      // stored record gets `amount: -amount` — so -N books a credit of N. The
+      // caller gate below limits this to the mint service account, but that
+      // account is not a trust boundary we want the ledger's integrity resting
+      // on. Mirror the check debit() makes in lib/payments.ts; this is the only
+      // tbDebit call site that lacked one.
+      if (!Number.isFinite(amount) || amount <= 0)
+        fail("Amount must be greater than zero");
       const ref = preimage;
       const { lightning: type } = PaymentType;
       if (user.username !== "mint") fail("unauthorized");
