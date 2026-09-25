@@ -75,6 +75,11 @@ export default {
   // never ship the sample value.
   txWebhookSecret: process.env.TX_WEBHOOK_SECRET || "pwa",
   domain: "coinos.io",
+  // Extra WebAuthn/passkey origins beyond https://<domain> and the Android
+  // apk origin — e.g. a dev host or an app subdomain. The passkey RPID is
+  // always <domain> (lib/passkey.ts pins it server-side; caller-supplied
+  // origin is ignored). Leave unset in production.
+  passkeyOrigins: [],
   // Used by lib/bip353.ts (per-user BIP-353 DNS records) and lib/auth.ts (auto-
   // ban an evicted account's source IP at the edge). apiToken needs Zone.DNS
   // Edit + Account.Account Filter Lists Edit permissions. rulesetId (unused

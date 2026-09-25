@@ -1647,9 +1647,9 @@ export default {
   async passkeyRegisterOptions(c) {
     try {
       const user = c.get("user");
-      const body = await c.req.json();
-      const origin = body.origin || `https://${config.hostname}`;
-      const options = await generatePasskeyRegistration(user, origin);
+      // origin is intentionally not read from the request; lib/passkey.ts pins
+      // it to server config so a caller cannot choose what it is verified against.
+      const options = await generatePasskeyRegistration(user);
       return c.json(options);
     } catch (e) {
       warn("passkeyRegisterOptions failed", e.message);
@@ -1661,8 +1661,7 @@ export default {
     try {
       const user = c.get("user");
       const body = await c.req.json();
-      const origin = body.origin || `https://${config.hostname}`;
-      const credential = await verifyPasskeyRegistration(user, body, origin);
+      const credential = await verifyPasskeyRegistration(user, body);
       if (!user.passkeys) user.passkeys = [];
       user.passkeys.push(credential);
       await s(`user:${user.id}`, user);
@@ -1675,9 +1674,8 @@ export default {
 
   async passkeyLoginOptions(c) {
     try {
-      const body = await c.req.json();
-      const origin = body.origin || `https://${config.hostname}`;
-      const options = await generatePasskeyLogin(origin);
+      await c.req.json().catch(() => ({}));
+      const options = await generatePasskeyLogin();
       return c.json(options);
     } catch (e) {
       warn("passkeyLoginOptions failed", e.message);
@@ -1688,9 +1686,8 @@ export default {
   async passkeyLoginVerify(c) {
     try {
       const body = await c.req.json();
-      const { credential, challengeId, origin: reqOrigin } = body;
-      const origin = reqOrigin || `https://${config.hostname}`;
-      const user = await verifyPasskeyLogin(credential, challengeId, origin);
+      const { credential, challengeId } = body;
+      const user = await verifyPasskeyLogin(credential, challengeId);
       const payload = { id: user.id };
       const token = jwt.sign(payload, config.jwt);
       return c.json({ user: pick(user, whitelist), token });
