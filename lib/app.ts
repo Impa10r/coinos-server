@@ -21,6 +21,31 @@ const app = new Hono();
 // an incident, take it from a proxy in front of the app rather than
 // accumulating it here for ever.
 
+// Normalise anything thrown that is not an Error. Hono routes ONLY Error
+// instances to app.onError; a bare string, a plain object, or a rejection
+// carrying either escapes Hono entirely and lands on Bun's own fallback
+// handler. That fallback answers 500 with a 66 KB HTML page whose embedded
+// payload carries the internal error text and the server's filesystem path
+// (/home/bun/app) — served to whoever made the request, authenticated or not.
+//
+// Reached unauthenticated via GET /decode/:bolt11 with a malformed invoice:
+// the CLN client throws a bare string ("Unparsable string: invalid token"),
+// which is a value type, not a bug in that handler. Anything anywhere that
+// throws a non-Error does the same, so this is fixed once here rather than per
+// call site. Outermost so it also covers throws from the middleware below.
+app.use("*", async (_c, next) => {
+  try {
+    await next();
+  } catch (e) {
+    if (e instanceof Error) throw e;
+    const err = new Error(
+      typeof e === "string" ? e : (e as any)?.message || JSON.stringify(e),
+    );
+    (err as any).cause = e;
+    throw err;
+  }
+});
+
 // IP blacklist — the app-level enforcement layer for the `cf:banned` redis
 // set that lib/auth.ts's banIp() maintains. Checked first, before CORS/rate-
 // limiting/routing, so a banned IP is rejected as cheaply as possible. This

@@ -1186,8 +1186,15 @@ export default {
   },
 
   async decode(c) {
+    // Unauthenticated, and the param is arbitrary caller text. ln.decode throws
+    // on anything that is not a valid invoice, so without this a typo was a
+    // 500. It is bad input.
     const bolt11 = c.req.param("bolt11");
-    return c.json(await ln.decode(bolt11));
+    try {
+      return c.json(await ln.decode(bolt11));
+    } catch {
+      return bail(c, "could not decode", 400);
+    }
   },
 
   // The user's standing bolt12 offer (lno1...) — reusable receive code they
