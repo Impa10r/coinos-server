@@ -23,6 +23,12 @@ const MAX_PROFILE_LOOKUPS = 8;
 // sockets immediately rather than merely being slow.
 const MAX_PAGE = 50;
 
+// /mls/users is a directory rather than a profile page, so it gets its own,
+// larger page. Still bounded: MLS_PAGE_MAX keeps one response well under 100 KB
+// where the unpaged endpoint was 1.48 MB.
+const MLS_PAGE = 200;
+const MLS_PAGE_MAX = 1000;
+
 // Clamp a caller-supplied page number into range, treating NaN and negatives as
 // the default rather than letting them through to slice().
 const page = (raw: string | undefined, dflt: number, max: number) => {
@@ -91,7 +97,22 @@ const parseZap = async (ev) => {
 export default {
   async mlsUsers(c) {
     try {
-      return c.json(await getMlsUsers());
+      // Paged. This returned the entire directory: 16,111 entries and 1.48 MB
+      // on this deployment, unauthenticated, on every request. Two problems —
+      // a bulk dump of harvested nostr identities (pubkey, name, nip05), and
+      // the largest egress amplifier in the app, since under the general
+      // 2000-req/2s bucket one IP could pull well over a gigabyte a second out
+      // of it. Nothing in coinos-ui reads this endpoint, so no caller depended
+      // on the unpaged shape.
+      const limit = page(c.req.query("limit"), MLS_PAGE, MLS_PAGE_MAX);
+      const offset = page(c.req.query("offset"), 0, 10_000_000);
+      const all = await getMlsUsers();
+      return c.json({
+        total: all.length,
+        offset,
+        limit,
+        users: all.slice(offset, offset + limit),
+      });
     } catch (e) {
       return bail(c, e);
     }
@@ -480,13 +501,17 @@ export default {
       const u = await getUser(name, fields);
       if (!u) return c.json({ names: {} }); // unknown name: empty per NIP-05, not a 500
       names = { [name]: u.pubkey };
-    } else {
-      const records = await db.sMembers("nip5");
-      for (const s of records) {
-        const [name, pubkey] = (s as string).split(":");
-        names[name] = pubkey;
-      }
     }
+    // A request with no `name` used to dump the whole `nip5` set — every
+    // username paired with its nostr pubkey, for every user who enabled NIP-05
+    // (routes/users.ts adds them on save). That is a complete account
+    // enumeration, and it links each coinos username to a nostr identity.
+    //
+    // NIP-05 resolution is per-name by design and the client is meant to ask for
+    // one: coinos-ui's hooks.server.ts proxies /.well-known/nostr.json forwarding
+    // `?name=`, so nothing here needed the bulk form. A client that fetches the
+    // bare file gets an empty set, which is what large providers return for the
+    // same reason.
 
     return c.json({ names });
   },
