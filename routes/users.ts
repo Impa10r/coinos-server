@@ -49,6 +49,9 @@ import { PaymentType } from "$lib/types";
 import { createBalanceAccount, getBalance, getCredit, getPending } from "$lib/tb";
 import { importAccountHistory } from "$lib/payments";
 import type { ProfilePointer } from "nostr-tools/nip19";
+// How long an emailed verification link stays good. It previously had no
+// expiry at all.
+const VERIFY_TTL = 24 * 60 * 60;
 
 const { host } = new URL(process.env.URL);
 const relay = encodeURIComponent(config.publicRelay);
@@ -1029,7 +1032,10 @@ export default {
       }
 
       const code = v4();
-      await s(`verify:${code}`, { id, email });
+      // With a TTL. This was written with none, so every verification link ever
+      // emailed stayed valid for ever — see verify() below, which also never
+      // consumed them.
+      await s(`verify:${code}`, { id, email }, VERIFY_TTL);
       const link = `${process.env.URL}/verify/${code}`;
       const subject = "Email Verification";
 
@@ -1053,9 +1059,32 @@ export default {
   async verify(c) {
     const code = c.req.param("code");
     try {
-      const { id, email } = await g(`verify:${code}`);
-      if (!id) fail("verification failed");
+      // Destructured straight off g(), so an unknown or expired code threw a
+      // TypeError and reported as a 500. It is a bad link.
+      const pending = await g(`verify:${code}`);
+      const { id, email } = pending ?? {};
+      if (!id || !email) return bail(c, "verification failed", 404);
+
+      // Single use. Nothing deleted the code before, so a link was replayable
+      // for ever: anyone holding an old one — the next owner of an abandoned
+      // address, or anyone who can read that mailbox — could re-assert it as
+      // the account's address long after the user had moved on. Since notify()
+      // mails to user.email when `verified`, that silently redirects a user's
+      // payment notifications. Claimed atomically so two replays cannot both
+      // win.
+      if (!(await db.set(`verify:${code}:used`, "1", { NX: true, EX: VERIFY_TTL })))
+        return bail(c, "verification failed", 404);
+      await db.del(`verify:${code}`);
+
+      // Do not take an address that now belongs to a different account.
+      // request() refuses to ISSUE a code for someone else's verified address,
+      // but a code issued before they claimed it would still have overwritten
+      // the mapping here.
+      const owner = await g(`email:${email.toLowerCase()}`);
+      if (owner && owner !== id) return bail(c, "Email already in use", 409);
+
       const user = await g(`user:${id}`);
+      if (!user) return bail(c, "verification failed", 404);
       user.email = email;
       user.verified = true;
       await s(`user:${id}`, user);
