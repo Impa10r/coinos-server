@@ -16,12 +16,37 @@ import { parseContent } from "$lib/notes";
 // client renders the npub, which beats a request that hangs for a minute.
 const MAX_PROFILE_LOOKUPS = 8;
 
+// Largest page a caller may ask for from follows/followers. `limit` came
+// straight from the query with no ceiling, so ?limit=100000 sliced 100000
+// pubkeys into a Promise.allSettled of getProfile calls — each uncached one
+// opening a websocket to every configured relay. Concurrent, so it exhausts
+// sockets immediately rather than merely being slow.
+const MAX_PAGE = 50;
+
+// Clamp a caller-supplied page number into range, treating NaN and negatives as
+// the default rather than letting them through to slice().
+const page = (raw: string | undefined, dflt: number, max: number) => {
+  const n = Number.parseInt(raw ?? "", 10);
+  if (!Number.isFinite(n) || n < 0) return dflt;
+  return Math.min(n, max);
+};
+
 // Resolve a deduped, capped set of pubkeys at once. Returns a Map, missing
 // entries meaning "not resolved" rather than "no such profile".
-const resolveProfiles = async (pubkeys: string[]) => {
-  const wanted = [...new Set(pubkeys.filter(Boolean))].slice(0, MAX_PROFILE_LOOKUPS);
+const resolveProfiles = async (pubkeys: string[], cap = MAX_PROFILE_LOOKUPS) => {
+  const wanted = [...new Set(pubkeys.filter(Boolean))].slice(0, cap);
   const results = await Promise.all(
     wanted.map(async (pk) => [pk, (await getProfile(pk).catch(() => null)) ?? null] as const),
+  );
+  return new Map(results);
+};
+
+// Same bounding for getNostrUser, which wraps getProfile and so carries the
+// same relay fan-out on a miss.
+const resolveNostrUsers = async (pubkeys: string[]) => {
+  const wanted = [...new Set(pubkeys.filter(Boolean))].slice(0, MAX_PROFILE_LOOKUPS);
+  const results = await Promise.all(
+    wanted.map(async (pk) => [pk, (await getNostrUser(pk).catch(() => null)) ?? null] as const),
   );
   return new Map(results);
 };
@@ -249,21 +274,22 @@ export default {
       // q() scans the local strfry and falls back to primal (the old code
       // called a `sync` helper that never existed and threw ReferenceError
       // whenever the local relay had no receipts)
-      const filter = { kinds: [9735, 9736], "#e": [id] };
+      // Bounded pull. Anyone can publish a kind-9735 referencing an id, and q()
+      // falls back to external relays, so the receipt count is attacker
+      // inflatable — and each one drove a sequential getNostrUser, i.e. a relay
+      // fan-out per zapper.
+      const filter = { kinds: [9735, 9736], "#e": [id], limit: MAX_PAGE };
       const events = await q(filter);
       if (!events.length) return c.json([]);
 
-      const zaps = [];
-      for (const zapEvent of events) {
-        const { amount, pubkey } = await parseZap(zapEvent);
+      const parsed = await Promise.all(events.map((e) => parseZap(e).catch(() => ({}) as any)));
+      const users = await resolveNostrUsers(parsed.map((z: any) => z.pubkey));
 
-        let user;
-        if (pubkey) {
-          try {
-            user = await getNostrUser(pubkey);
-            zaps.push({ amount, user });
-          } catch {}
-        }
+      const zaps = [];
+      for (const { amount, pubkey } of parsed as any[]) {
+        if (!pubkey) continue;
+        const user = users.get(pubkey);
+        if (user) zaps.push({ amount, user });
       }
 
       return c.json(zaps.filter((z) => z.amount > 0));
@@ -299,16 +325,30 @@ export default {
     try {
       const events = await q({ kinds: [1], authors: [pubkey], limit: 20 });
 
+      // Parse first, then resolve every pubkey the page needs in one capped
+      // concurrent batch. Previously this awaited a getProfile per event for its
+      // author and another per npub inside each event's body — the events are
+      // capped at 20 but the npubs inside them are not.
       for (const v of events) {
         const e = v as any;
-        e.author = await getProfile(e.pubkey);
         e.parts = parseContent(e);
         e.names = {};
+      }
+      const evProfiles = await resolveProfiles([
+        ...events.map((e: any) => e.pubkey),
+        ...events.flatMap((e: any) =>
+          e.parts
+            .filter(({ type }) => type.includes("nprofile") || type.includes("npub"))
+            .map(({ value }) => value.pubkey),
+        ),
+      ]);
+
+      for (const v of events) {
+        const e = v as any;
+        e.author = evProfiles.get(e.pubkey) ?? null;
         for (const { type, value } of e.parts) {
-          if (type.includes("nprofile") || type.includes("npub")) {
-            const { name } = (await getProfile(value.pubkey)) ?? ({} as any);
-            e.names[value.pubkey] = name;
-          }
+          if (type.includes("nprofile") || type.includes("npub"))
+            e.names[value.pubkey] = evProfiles.get(value.pubkey)?.name;
         }
       }
 
@@ -321,36 +361,43 @@ export default {
 
   async follows(c) {
     const pubkey = c.req.param("pubkey");
-    const limit = parseInt(c.req.query("limit") || "20");
-    const offset = parseInt(c.req.query("offset") || "0");
+    // Clamped. Uncapped, these sliced as many pubkeys as the caller asked for
+    // into a concurrent batch of profile lookups.
+    const limit = page(c.req.query("limit"), 20, MAX_PAGE);
+    const offset = page(c.req.query("offset"), 0, 100_000);
     const pubkeysOnly = c.req.query("pubkeysOnly");
     try {
-      const k = `${pubkey}:follows${pubkeysOnly ? ":pubkeys" : ""}`;
-      let follows = await g(k);
-      if (follows?.length) return c.json(follows);
+      // Cache the page-INDEPENDENT pubkey list, not a rendered page. The key
+      // used to be `<pubkey>:follows` with no limit/offset in it, so the first
+      // request's page was served to every later one for EX (24h): ?offset=50
+      // returned page one, and ?limit=5 returned whatever the first caller had
+      // asked for. Putting limit/offset in the key would fix that but hand an
+      // unauthenticated caller an unbounded set of cache keys to create by
+      // varying offset, so cache the raw list once and page it per request.
+      // The profiles themselves are already individually cached by getProfile.
+      const k = `${pubkey}:follows:tags`;
+      let pubkeys: string[] = (await g(k)) ?? [];
 
-      const event = await get({ authors: [pubkey], kinds: [3] });
-      if (!event) return c.json([]);
-
-      let pubkeys = event.tags.filter((tag) => tag[0] === "p").map((tag) => tag[1]);
-
-      follows = [];
-      if (pubkeysOnly) follows = pubkeys;
-      else {
-        pubkeys = pubkeys.slice(offset, offset + limit);
-        follows = (
-          await Promise.allSettled(
-            pubkeys.map(async (pubkey) => ({
-              ...(await getProfile(pubkey)),
-              pubkey,
-            })),
-          )
-        )
-          .filter((r) => r.status === "fulfilled")
-          .map((r) => r.value);
+      if (!pubkeys.length) {
+        const event = await get({ authors: [pubkey], kinds: [3] });
+        if (!event) return c.json([]);
+        pubkeys = event.tags.filter((tag) => tag[0] === "p").map((tag) => tag[1]);
+        if (pubkeys.length) await db.set(k, JSON.stringify(pubkeys), { EX });
       }
 
-      await db.set(k, JSON.stringify(follows), { EX });
+      if (pubkeysOnly) return c.json(pubkeys);
+
+      // MAX_PAGE, not MAX_PROFILE_LOOKUPS: these profiles ARE the response, so
+      // the bound is the page the caller asked for (already clamped), unlike a
+      // profile merely mentioned inside someone's note.
+      const wanted = pubkeys.slice(offset, offset + limit);
+      const profiles = await resolveProfiles(wanted, MAX_PAGE);
+      const follows = wanted
+        .map((pk) => {
+          const p = profiles.get(pk);
+          return p ? { ...p, pubkey: pk } : null;
+        })
+        .filter(Boolean);
 
       return c.json(follows);
     } catch (e) {
@@ -361,28 +408,32 @@ export default {
 
   async followers(c) {
     const pubkey = c.req.param("pubkey");
-    const limit = parseInt(c.req.query("limit") || "20");
-    const offset = parseInt(c.req.query("offset") || "0");
+    // Clamped. Uncapped, these sliced as many pubkeys as the caller asked for
+    // into a concurrent batch of profile lookups.
+    const limit = page(c.req.query("limit"), 20, MAX_PAGE);
+    const offset = page(c.req.query("offset"), 0, 100_000);
     try {
-      let followers = await g(`${pubkey}:followers`);
-      if (followers?.length) return c.json(followers);
+      // Same as follows(): cache the page-independent pubkey list, not a
+      // rendered page. `<pubkey>:followers` had no limit/offset in the key, so
+      // the first caller's page was returned to everyone for 24h.
+      const k = `${pubkey}:followers:tags`;
+      let pubkeys: string[] = (await g(k)) ?? [];
 
-      const events = await q({ kinds: [3], "#p": [pubkey], limit });
-      if (!events.length) return c.json([]);
+      if (!pubkeys.length) {
+        const events = await q({ kinds: [3], "#p": [pubkey], limit: MAX_PAGE });
+        if (!events.length) return c.json([]);
+        pubkeys = [...new Set(events.map((e: any) => e.pubkey))];
+        if (pubkeys.length) await db.set(k, JSON.stringify(pubkeys), { EX });
+      }
 
-      const pubkeys = events.map((e) => e.pubkey).slice(offset, offset + limit);
-      followers = (
-        await Promise.allSettled(
-          pubkeys.map(async (pubkey) => ({
-            ...(await getProfile(pubkey)),
-            pubkey,
-          })),
-        )
-      )
-        .filter((r) => r.status === "fulfilled")
-        .map((r) => r.value);
-
-      await db.set(`${pubkey}:followers`, JSON.stringify(followers), { EX });
+      const wanted = pubkeys.slice(offset, offset + limit);
+      const profiles = await resolveProfiles(wanted, MAX_PAGE);
+      const followers = wanted
+        .map((pk) => {
+          const p = profiles.get(pk);
+          return p ? { ...p, pubkey: pk } : null;
+        })
+        .filter(Boolean);
 
       return c.json(followers);
     } catch (e) {
