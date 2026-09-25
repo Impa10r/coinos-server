@@ -69,20 +69,26 @@ export default {
     //   fees_collected_msat                           routing revenue
     //   our_features                                  feature bits
     //
-    // What stays is what the public gossip graph already tells anyone who asks:
-    // the node's own id, its alias and colour, the network, and how many peers
-    // and live channels it has. Nothing in coinos-ui reads this endpoint, so the
-    // dropped fields had no consumer here; an external caller that genuinely
-    // needs more should be authenticated for it.
+    // What stays is chain state only — nothing that identifies or profiles the
+    // node.
+    //
+    // An earlier pass kept id, alias, colour and the peer/channel counts on the
+    // reasoning that gossip publishes them anyway. That is wrong: a
+    // node_announcement is only gossiped for a node with at least one ANNOUNCED
+    // channel, so a node whose channels are all unannounced is not in the public
+    // graph and its id and alias are not public. The counts leak more than the
+    // identity does — an observer can diff num_active_channels against the
+    // announced channels visible in the graph and learn how many UNANNOUNCED
+    // channels this node has, which is exactly what keeping them unannounced is
+    // for.
+    //
+    // Nothing in coinos-ui reads this endpoint. It stays only because /info is a
+    // conventional thing for external monitoring to poll; anything node-specific
+    // belongs behind auth.
     const i: any = await ln.getinfo();
     return c.json({
-      id: i.id,
-      alias: i.alias,
-      color: i.color,
       network: i.network,
       blockheight: i.blockheight,
-      num_peers: i.num_peers,
-      num_active_channels: i.num_active_channels,
     });
   },
 
