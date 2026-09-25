@@ -59,39 +59,6 @@ const fundHidden = async (fid: string, uid?: string) => {
 };
 
 export default {
-  async info(c) {
-    // Curated, not the raw getinfo. This route is unauthenticated and returned
-    // the node's entire getinfo, which on this deployment meant:
-    //
-    //   version:       "v26.06.6"                     exact build, for CVE targeting
-    //   binding:       172.18.0.12:9735               internal network address
-    //   lightning-dir: "/root/.lightning/regtest"     filesystem path, and that it runs as root
-    //   fees_collected_msat                           routing revenue
-    //   our_features                                  feature bits
-    //
-    // What stays is chain state only — nothing that identifies or profiles the
-    // node.
-    //
-    // An earlier pass kept id, alias, colour and the peer/channel counts on the
-    // reasoning that gossip publishes them anyway. That is wrong: a
-    // node_announcement is only gossiped for a node with at least one ANNOUNCED
-    // channel, so a node whose channels are all unannounced is not in the public
-    // graph and its id and alias are not public. The counts leak more than the
-    // identity does — an observer can diff num_active_channels against the
-    // announced channels visible in the graph and learn how many UNANNOUNCED
-    // channels this node has, which is exactly what keeping them unannounced is
-    // for.
-    //
-    // Nothing in coinos-ui reads this endpoint. It stays only because /info is a
-    // conventional thing for external monitoring to poll; anything node-specific
-    // belongs behind auth.
-    const i: any = await ln.getinfo();
-    return c.json({
-      network: i.network,
-      blockheight: i.blockheight,
-    });
-  },
-
   async create(c) {
     let body;
     try {

@@ -129,7 +129,6 @@ app.post("/zap", auth, nostr.zap);
 app.post("/zapRequest", auth, nostr.zapRequest);
 app.get("/thread/:id", nostr.thread);
 
-app.get("/info", payments.info);
 app.post("/sendinvoice", auth, payments.sendinvoice);
 app.post("/payments", auth, payments.create);
 app.get("/payments", auth, payments.list);
@@ -270,6 +269,16 @@ app.post("/shopify/:id", shopify);
 // account, and neither flag was ever read: `unlimited` was written and nothing
 // consulted it, `hidepay` only appeared in output projections. Admin-gated
 // endpoints that change nothing are surface without a feature behind them.
+// GET /info removed. It proxied the node's entire CLN getinfo to anyone —
+// exact version, the internal binding address, /root/.lightning (so, running as
+// root), routing revenue, feature bits — and then, after a first pass trimmed
+// it, still the node id, alias and channel counts. Those are not public either:
+// a node_announcement is only gossiped for a node with an ANNOUNCED channel, and
+// the channel counts diffed against the gossip graph reveal how many
+// UNANNOUNCED channels the node has. Nothing consumed the endpoint: not
+// coinos-ui, not the compose healthchecks (which call `lncli getinfo` directly),
+// not any script. /health covers liveness.
+
 // POST /forgot removed with POST /reset. It issued a `reset:<code>` key and
 // mailed a link to /reset — a route that already 404'd for every non-admin
 // caller, and whose handler never validated the code anyway (it reset by
