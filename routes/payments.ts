@@ -60,7 +60,30 @@ const fundHidden = async (fid: string, uid?: string) => {
 
 export default {
   async info(c) {
-    return c.json(await ln.getinfo());
+    // Curated, not the raw getinfo. This route is unauthenticated and returned
+    // the node's entire getinfo, which on this deployment meant:
+    //
+    //   version:       "v26.06.6"                     exact build, for CVE targeting
+    //   binding:       172.18.0.12:9735               internal network address
+    //   lightning-dir: "/root/.lightning/regtest"     filesystem path, and that it runs as root
+    //   fees_collected_msat                           routing revenue
+    //   our_features                                  feature bits
+    //
+    // What stays is what the public gossip graph already tells anyone who asks:
+    // the node's own id, its alias and colour, the network, and how many peers
+    // and live channels it has. Nothing in coinos-ui reads this endpoint, so the
+    // dropped fields had no consumer here; an external caller that genuinely
+    // needs more should be authenticated for it.
+    const i: any = await ln.getinfo();
+    return c.json({
+      id: i.id,
+      alias: i.alias,
+      color: i.color,
+      network: i.network,
+      blockheight: i.blockheight,
+      num_peers: i.num_peers,
+      num_active_channels: i.num_active_channels,
+    });
   },
 
   async create(c) {

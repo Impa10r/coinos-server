@@ -93,8 +93,12 @@ export default {
   },
 
   async encode(c) {
+    // `address` is optional in the query, so a call without it used to reach
+    // undefined.split() and report a caller mistake as a 500.
     const address = c.req.query("address");
+    if (!address?.includes("@")) return bail(c, "address required", 400);
     const [name, domain] = address.split("@");
+    if (!name || !domain) return bail(c, "address required", 400);
     const url = `https://${domain}/.well-known/lnurlp/${name.toLowerCase().replace(/\s/g, "")}`;
 
     try {
