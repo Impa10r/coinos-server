@@ -27,14 +27,6 @@ docker run --rm \
   ghcr.io/tigerbeetle/tigerbeetle:latest \
   format --cluster=0 --replica=0 --replica-count=1 /data/0_0.tigerbeetle
 
-# init ark
-SEED=$(curl -s http://localhost:7071/v1/admin/wallet/seed | grep -o '"seed":"[^"]*"' | cut -d'"' -f4)
-curl -X POST http://localhost:7071/v1/admin/wallet/create \
-  -H 'Content-Type: application/json' \
-  -d "{\"password\":\"testpassword\",\"seed\":\"$SEED\"}"
-curl -X POST http://localhost:7071/v1/admin/wallet/unlock \
-  -H 'Content-Type: application/json' \
-  -d '{"password":"testpassword"}'
   
 docker-compose build --no-cache app
 docker compose up -d
