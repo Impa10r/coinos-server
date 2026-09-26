@@ -34,6 +34,20 @@ import { SATS, bail, fail, fields, getClientIp, getInvoice, getPayment, getUser,
 import rpc from "@coinos/rpc";
 import { timingSafeEqual } from "crypto";
 import got from "got";
+import { safeGot } from "$lib/safe-fetch";
+import { SocksProxyAgent } from "socks-proxy-agent";
+
+// A lightning address resolves via a GET to a domain the CALLER supplies
+// (user@domain), and the callback that lookup returns is fetched too. Both must
+// go through the SSRF guard — an authenticated user could otherwise point either
+// at 169.254.169.254 or an internal service. routes/lnurl.ts already does this
+// for the same task; /send/:lnaddress/:amount was still on raw got().
+const lnurlProxyAgent = process.env.LNURL_PROXY
+  ? new SocksProxyAgent(process.env.LNURL_PROXY)
+  : undefined;
+const lnurlOpts = lnurlProxyAgent
+  ? { agent: { http: lnurlProxyAgent as any, https: lnurlProxyAgent as any } }
+  : {};
 import { v4, validate as isUuid } from "uuid";
 
 const lq = rpc(config.liquid);
@@ -1059,9 +1073,11 @@ export default {
       await requirePin({ body, user });
 
       const [username, domain] = lnaddress.split("@");
-      const { minSendable, maxSendable, callback, metadata } = (await got(
+      if (!username || !domain) fail("invalid lightning address");
+      const { minSendable, maxSendable, callback, metadata } = (await safeGot(
         `https://${domain}/.well-known/lnurlp/${username}`,
-      ).json()) as any;
+        lnurlOpts,
+      )) as any;
 
       if (amount * 1000 < minSendable || amount * 1000 > maxSendable) fail("amount out of range");
 
@@ -1077,7 +1093,9 @@ export default {
           ? `Paid to ${lnaddress}: ${description}`
           : `Paid to ${lnaddress}`;
 
-      const r: any = await got(`${callback}?amount=${amount * 1000}`).json();
+      // callback comes from the (caller-influenced) lookup above, so it is
+      // guarded too, not just the first hop.
+      const r: any = await safeGot(`${callback}?amount=${amount * 1000}`, lnurlOpts);
       if (r.reason) fail(r.reason);
       const { pr } = r;
 
