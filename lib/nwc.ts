@@ -1091,13 +1091,18 @@ const handle = (method, params, ev, app, user) =>
     },
 
     async get_info() {
-      const { alias, blockheight, color, id, network } = await ln.getinfo();
+      // No node identity. This returned the lightning node's alias, colour and
+      // pubkey to every connected app — coinos' node, not the user's wallet, and
+      // not something an app needs: all get_info fields but `methods` are
+      // optional in NIP-47. The node id is not public either when its channels
+      // are unannounced, so handing it to any third-party app was a leak.
+      const { blockheight, network } = await ln.getinfo();
 
       return result({
-        alias,
+        // The service's name, not the node's: apps display this as the wallet
+        // label, and the domain identifies coinos without exposing the node.
+        alias: config.domain,
         block_height: blockheight,
-        color,
-        pubkey: id,
         // CLN calls mainnet "bitcoin"; NIP-47 clients expect "mainnet"
         network: network === "bitcoin" ? "mainnet" : network,
         methods,
@@ -1106,9 +1111,18 @@ const handle = (method, params, ev, app, user) =>
     },
 
     async get_balance() {
-      let balance = await getBalance(user.id);
-      balance *= 1000;
-      return result({ balance });
+      // What this connection can spend, not the whole account. It returned the
+      // user's entire custodial balance to every app regardless of budget, so a
+      // connection given a small allowance still learned exactly how much the
+      // user holds. An unlimited connection can spend everything, so it sees
+      // everything; a budgeted one sees min(balance, remaining budget); an
+      // invalid or exhausted one sees 0.
+      const balance = await getBalance(user.id);
+      const { budgetError, remaining } = await checkBudget(app, 0);
+      let spendable = balance;
+      if (budgetError) spendable = 0;
+      else if (remaining !== undefined) spendable = Math.min(balance, remaining);
+      return result({ balance: Math.max(0, spendable) * 1000 });
     },
 
     async make_invoice() {
