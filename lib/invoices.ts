@@ -26,7 +26,20 @@ export const parseEntry = (e) => {
   return { preimage: e, price: null, fiat: null, currency: null };
 };
 
-export const generate = async ({ invoice, user }) => {
+// `serverBolt12` is for one caller only: routes/payments.ts sendinvoice, where
+// CLN itself minted and signed the bolt12 invoice in answer to a payer's
+// invoice_request. It is a sibling of `invoice`, never a field of it, because
+// `invoice` is request-body data on POST /invoice and the whole point of the
+// guard below is that a CALLER may not supply an invoice to be credited.
+export const generate = async ({
+  invoice,
+  user,
+  serverBolt12,
+}: {
+  invoice: any;
+  user: any;
+  serverBolt12?: string;
+}) => {
   let {
     address_type,
     bolt11,
@@ -213,7 +226,20 @@ export const generate = async ({ invoice, user }) => {
     // mint the offer server-side.
     if (bolt12) fail("Cannot provide your own bolt12 invoice");
     let r;
-    {
+    if (serverBolt12) {
+      // The sendinvoice path. This guard (cdc28900) broke it: sendinvoice passed
+      // CLN's invoice in `invoice.bolt12`, so every call threw here — AFTER
+      // ln.sendinvoice had returned, i.e. after the payer had paid. The invoice
+      // record was never written, replay() found no invoice for the payment and
+      // returned, and the user was never credited for money the node received.
+      //
+      // Still checked: it must be an invoice issued by this node.
+      const { id: nodeid } = await ln.getinfo();
+      r = await ln.decode(serverBolt12);
+      if (r.invoice_node_id !== nodeid) fail("invalid invoice");
+      amount = Math.round(r.invoice_amount_msat / 1000);
+      r.bolt12 = serverBolt12;
+    } else {
       r = await ln.offer({
         amount: amount ? `${amount + tip}sat` : "any",
         label: `${id} ${user.username} ${new Date()}`,

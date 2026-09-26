@@ -143,7 +143,21 @@ export async function listenForLightning() {
         return warn("skipping mint-owned invoice (not a coinos deposit)", label, bolt11);
 
       const invoice = await getInvoice(bolt11 ?? local_offer_id ?? bolt12);
-      if (!invoice) return warn("received lightning with no invoice", bolt11);
+      // Identify the payment. This logged only `bolt11`, which is undefined for a
+    // bolt12 receive, so a stranded bolt12 payment appeared as a bare
+    // "received lightning with no invoice " with nothing to trace it by. Note a
+    // sendinvoice receive logs this once harmlessly (this listener sees the
+    // payment before sendinvoice writes the record, then replay() credits it);
+    // one with no later credit for the same key is money the node holds that
+    // no user was credited for. Never log the preimage: for usePreimage
+    // invoices it is the secret being sold (routes/preimages.ts).
+    if (!invoice)
+      return warn(
+        "received lightning with no invoice",
+        bolt11 ?? local_offer_id ?? bolt12,
+        received,
+        "sat",
+      );
 
       // A deleted account's invoice or bolt12 offer can still be paid (OCEAN
       // payouts to a deleted user's offer, 2026-09-05). Nothing can be

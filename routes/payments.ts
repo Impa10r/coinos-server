@@ -1255,13 +1255,18 @@ export default {
         label: v4(),
       });
 
+      // serverBolt12, not invoice.bolt12: this invoice was minted and signed by
+      // our own node in answer to the payer's invoice_request, and by the time
+      // ln.sendinvoice returns the payer has already paid it. Passing it inside
+      // `invoice` hit generate()'s caller-supplied-invoice guard, so the record
+      // was never written and the payment was never credited.
       await generate({
         invoice: {
           amount: Math.round(amount_msat / 1000),
           type: "bolt12",
-          bolt12,
         },
         user,
+        serverBolt12: bolt12,
       });
 
       const p = await replay(pay_index);
