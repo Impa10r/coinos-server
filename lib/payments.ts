@@ -2575,39 +2575,72 @@ const finalize = async (r, p) => {
 };
 
 export const reverse = async (p) => {
-  await sleep(Math.floor(Math.random() * (1500 - 500 + 1)) + 500);
+  // Exactly-once claim. tbReverse uses non-deterministic transfer ids, so two
+  // reverse() calls for one payment credit the FULL amount back twice — TB has
+  // no idempotency to fall back on. The only prior guard was the existence
+  // check below, which is check-then-act with tbReverse in the gap: two callers
+  // (completeLightningInBackground's failure branch and check()) could both pass
+  // it and both refund. Claim first, before the sleep, so a loser returns at
+  // once. Released only on an error before the ledger write, so a genuine
+  // transient failure can still be retried; a completed reverse holds the claim
+  // (EX) and a re-reverse is a no-op.
+  if (!(await db.set(`reversing:${p.id}`, "1", { NX: true, EX: 300 }))) {
+    warn("reverse already claimed, skipping", p.id);
+    return;
+  }
 
-  const total = Math.abs(p.amount) + p.fee + p.ourfee;
-  const ourfee = p.ourfee || 0;
-  // Restore the free-tier credit consumed at debit time. Use the SAME rate the
-  // send was charged at — flagged `ln:nofree` accounts were charged the elevated
-  // rate, so reversing with the standard rate would push their credit negative.
-  const rate = (await g(`ln:nofree:${p.uid}`))
-    ? config.fee.lightningHigh
-    : config.fee.lightning;
-  const credit = Math.round(total * rate) - ourfee;
+  try {
+    await sleep(Math.floor(Math.random() * (1500 - 500 + 1)) + 500);
 
-  l("reversing", p.id, p.amount, p.fee, total, ourfee, credit);
+    const total = Math.abs(p.amount) + p.fee + p.ourfee;
+    const ourfee = p.ourfee || 0;
+    // Restore the free-tier credit consumed at debit time. Use the SAME rate the
+    // send was charged at — flagged `ln:nofree` accounts were charged the elevated
+    // rate, so reversing with the standard rate would push their credit negative.
+    const rate = (await g(`ln:nofree:${p.uid}`))
+      ? config.fee.lightningHigh
+      : config.fee.lightning;
+    const credit = Math.round(total * rate) - ourfee;
 
-  // Check payment still exists before reversing
-  const exists = await db.exists(`payment:${p.id}`);
-  if (!exists) throw new Error("Payment has already been reversed");
+    l("reversing", p.id, p.amount, p.fee, total, ourfee, credit);
 
-  // TB: restore balance + credits
-  await tbReverse(p.uid, total, credit);
+    // Re-read the STORED record, not the (possibly stale) `p` passed in.
+    const stored: any = await g(`payment:${p.id}`);
+    // Gone: a concurrent reverse already refunded it.
+    if (!stored) throw new Error("Payment has already been reversed");
+    // Finalized: it has a preimage, so it SETTLED on the network. finalize()
+    // keeps the record (unlike a reverse, which deletes it), so the existence
+    // check alone never caught a reverse arriving after a finalize — it would
+    // refund a payment that completed, and the user keeps both the goods and
+    // the money. Never reverse a settled payment.
+    if (stored.ref || stored.confirmed) {
+      warn("refusing to reverse a finalized payment", p.id);
+      return;
+    }
 
-  // Redis: clean up payment records
-  await db
-    .multi()
-    .del(`payment:${p.id}`)
-    .sRem("pending", p.hash)
-    .del(`payment:${p.hash}`)
-    .lRem(`${p.uid}:payments`, 0, p.id)
-    .lRem("payments", 0, p.id)
-    .exec();
+    // TB: restore balance + credits
+    await tbReverse(p.uid, total, credit);
 
-  warn("reversed", p.id);
-  emit(p.uid, "payment", { id: p.id, hash: p.hash, uid: p.uid, type: p.type, reversed: true });
+    // Redis: clean up payment records
+    await db
+      .multi()
+      .del(`payment:${p.id}`)
+      .sRem("pending", p.hash)
+      .del(`payment:${p.hash}`)
+      .lRem(`${p.uid}:payments`, 0, p.id)
+      .lRem("payments", 0, p.id)
+      .exec();
+
+    warn("reversed", p.id);
+    emit(p.uid, "payment", { id: p.id, hash: p.hash, uid: p.uid, type: p.type, reversed: true });
+  } catch (e) {
+    // Released ONLY when the ledger write hasn't happened — the "already
+    // reversed" throw above, or a failure before tbReverse — so a real retry is
+    // possible. Once tbReverse + the multi have run the function returns
+    // normally and the claim stands, blocking a second refund.
+    await db.del(`reversing:${p.id}`);
+    throw e;
+  }
 };
 
 const freezeCheck = async () => {
