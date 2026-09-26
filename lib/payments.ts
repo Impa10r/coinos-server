@@ -2469,7 +2469,9 @@ export const check = async () => {
   setTimeout(check, 5000);
 };
 
-const finalize = async (r, p) => {
+// Exported for the concurrency test in test/finalize-refund.test.ts; the
+// normal callers are completeLightningInBackground and check() in this module.
+export const finalize = async (r, p) => {
   let { preimage } = r;
   if (!preimage) preimage = r.preimage;
   if (!preimage) preimage = r.payment_preimage;
@@ -2554,8 +2556,15 @@ const finalize = async (r, p) => {
     p.fee = Math.max(0, Math.round((r.amount_sent_msat - invoiceMsat) / 1000));
     if (!Number.isFinite(p.fee)) p.fee = maxfee;
 
-    if (!(await g(`payment:${p.id}`)).ref) {
-      await s(`payment:${p.id}`, p);
+    // Persist the preimage (idempotent — same record either way).
+    if (!(await g(`payment:${p.id}`)).ref) await s(`payment:${p.id}`, p);
+
+    // Refund the unused fee reserve EXACTLY ONCE. tbRefund, like tbReverse,
+    // uses non-deterministic TB transfer ids, so a concurrent second finalize
+    // would refund the reserve twice; the `ref` check above is check-then-act
+    // and does not stop that. The claim is the single arbiter, whichever
+    // finalize gets there first.
+    if (await db.set(`refunded:${p.id}`, "1", { NX: true, EX: 86400 })) {
       l("refunding fee", maxfee, p.fee, maxfee - p.fee, p.ref);
       await tbRefund(p.uid, maxfee - p.fee);
     }
