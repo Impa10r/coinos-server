@@ -1207,14 +1207,31 @@ export default {
   async fetchinvoice(c) {
     const body = await c.req.json();
     const { amount, offer, payer_note } = body;
-    return c.json(
-      await ln.fetchinvoice({
-        offer,
-        amount_msat: amount ? amount * 1000 : undefined,
-        payer_note,
-        timeout: 60,
-      }),
-    );
+    if (typeof offer !== "string" || !offer.startsWith("lno"))
+      return bail(c, "invalid offer", 400);
+
+    // fetchinvoice is in lib/ln.ts's NO_TIMEOUT set, so the 30s RPC wrapper does
+    // not bound it; each call can hold a node RPC for its own 60s timeout while
+    // CLN waits on a remote offer issuer. One per user at a time is plenty for
+    // the send flow and the scan/paste probe that use it.
+    const uid = c.get("user").id;
+    const k = `fetchinvoice:inflight:${uid}`;
+    if (!(await db.set(k, "1", { NX: true, EX: 90 })))
+      return bail(c, "another offer lookup is already in progress", 429);
+    try {
+      return c.json(
+        await ln.fetchinvoice({
+          offer,
+          amount_msat: amount ? amount * 1000 : undefined,
+          payer_note,
+          timeout: 60,
+        }),
+      );
+    } catch {
+      return bail(c, "could not fetch invoice for offer", 400);
+    } finally {
+      await db.del(k);
+    }
   },
 
   async auth(c) {
