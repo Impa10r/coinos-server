@@ -123,15 +123,3 @@ c72fa2a5ccf1cc04073f9ff12606491971dadd36 # ecash: redeem tokens by melting to th
 
 # Logging for the quote mechanism above; meaningless without it.
 23c8b11bd3c1dee56781cc83e65e077409c0858e # lightning: log quote outcomes
-
-# MOOT here: this fork's tor is an OUTBOUND SOCKS5 client only (docker/
-# tor.Dockerfile: SocksPort 0.0.0.0:9050, no HiddenService, no ORPort — the app
-# dials it for onion mirrors / LNURL_PROXY). The commit guards against an
-# INBOUND onion HiddenService peer reaching the app directly and spoofing
-# cf-connecting-ip; there is no such peer here — tor never connects to the app.
-# The origin is also locked to Cloudflare IP ranges (operator-confirmed
-# 2026-09-24), so no untrusted peer reaches the app directly at all. It is
-# written for Fastify besides (app.addHook/req.socket), which this Hono fork
-# does not have. Revisit IF an inbound onion service forwarding to the app is
-# ever added — then the header-pinning it does is needed.
-56aef551bf72eb306d96b4b81b657c4a05037eb5 # app: don't trust client IP headers on onion requests
