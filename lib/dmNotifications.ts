@@ -4,6 +4,7 @@ import { l, warn } from "$lib/logging";
 import { getUser } from "$lib/utils";
 import { Relay } from "nostr-tools/relay";
 import webpush from "web-push";
+import { validPushSubscription } from "$lib/push";
 
 if (config.vapid) {
   webpush.setVapidDetails(`mailto:${config.support}`, config.vapid.pk, config.vapid.sk);
@@ -38,6 +39,10 @@ const sendPush = async (pubkey: string, url = "/messages", event?: any) => {
     const payload = JSON.stringify(payloadObj);
 
     for (const s of subscriptions as any) {
+      if (!validPushSubscription(s)) {
+        db.sRem(`${user.id}:subscriptions`, s);
+        continue;
+      }
       webpush.sendNotification(JSON.parse(s as string), payload).catch((e) => {
         warn("push failed", e.message);
         db.sRem(`${user.id}:subscriptions`, s);

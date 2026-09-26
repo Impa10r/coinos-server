@@ -9,6 +9,7 @@ import { f, fiat, fmt, getUser, link, nada, t } from "$lib/utils";
 import { hexToBytes } from "@noble/hashes/utils.js";
 import { finalizeEvent } from "nostr-tools";
 import webpush from "web-push";
+import { validPushSubscription } from "$lib/push";
 
 if (config.vapid) {
   webpush.setVapidDetails(`mailto:${config.support}`, config.vapid.pk, config.vapid.sk);
@@ -59,6 +60,12 @@ export const notify = async (p, user, withdrawal) => {
   };
 
   for (const s of subscriptions as any) {
+    // Defence in depth against endpoints stored before validation existed:
+    // never POST to one that isn't a valid vendor endpoint now, and drop it.
+    if (!validPushSubscription(s)) {
+      db.sRem(`${user.id}:subscriptions`, s);
+      continue;
+    }
     webpush.sendNotification(JSON.parse(s as string), JSON.stringify(payload)).catch((e) => {
       warn("sub failed", e.message);
       db.sRem(`${user.id}:subscriptions`, s);

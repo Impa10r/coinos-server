@@ -18,6 +18,7 @@ const sanitizeImageUrl = (url: string | undefined): string | undefined => {
 };
 import config from "$config";
 import { hashPin, isEvicted, pinMatches, requirePin } from "$lib/auth";
+import { MAX_SUBSCRIPTIONS, validPushSubscription } from "$lib/push";
 import { db, g, ga, gf, gfAll, s } from "$lib/db";
 import { err, l, warn } from "$lib/logging";
 import { mail, templates } from "$lib/mail";
@@ -768,7 +769,21 @@ export default {
       const body = await c.req.json();
       const { subscription } = body;
       const { id } = c.get("user");
-      await db.sAdd(`${id}:subscriptions`, JSON.stringify(subscription));
+
+      // Reject anything that isn't a well-formed push subscription aimed at a
+      // known vendor endpoint over https. web-push POSTs to endpoint on every
+      // payment, so an unchecked value is a server-side request to a host the
+      // caller chose (SSRF); see lib/push.ts.
+      const canonical = validPushSubscription(subscription);
+      if (!canonical) return bail(c, "invalid push subscription", 400);
+
+      // Bound the set. It only ever grew, so a caller could accumulate
+      // subscriptions without limit, each one another POST per notification.
+      const stored = (await db.sMembers(`${id}:subscriptions`)) as string[];
+      if (!stored.includes(canonical) && stored.length >= MAX_SUBSCRIPTIONS)
+        return bail(c, "too many push subscriptions", 409);
+
+      await db.sAdd(`${id}:subscriptions`, canonical);
       return c.json(subscription);
     } catch (e) {
       warn("subscription failed", e.message);
